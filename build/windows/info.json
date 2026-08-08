@@ -1,0 +1,16 @@
+{
+	"fixed": {
+		"file_version": "11.2.0.0",
+		"product_version": "11.2.0.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "11.2",
+			"CompanyName": "SGFG",
+			"FileDescription": "神龟翻滚 NextGen 私人代理工具",
+			"LegalCopyright": "(c) 2026, SGFG",
+			"ProductName": "SGFG-NG",
+			"Comments": "SGFG-NG"
+		}
+	}
+}
