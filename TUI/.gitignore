@@ -1,0 +1,6 @@
+/bin/
+/dist/
+*.exe
+sgfg-tui
+sgfg-tui-linux
+sgfg-tui-macos
