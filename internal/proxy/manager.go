@@ -9,6 +9,7 @@ import (
 
 	"sgfg-ng/internal/core"
 	"sgfg-ng/internal/ping"
+	"sgfg-ng/internal/sockfilter"
 	"sgfg-ng/internal/sysproxy"
 )
 
@@ -20,18 +21,19 @@ const (
 )
 
 type StatusInfo struct {
-	State       string `json:"state"`
-	Transport   string `json:"transport"`
-	NodeLabel   string `json:"nodeLabel"`
-	NodeName    string `json:"nodeName"`
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	LocalPort   int    `json:"localPort"`
-	Method      string `json:"method"`
-	ListenAddr  string `json:"listenAddr"`
-	SysProxy    bool   `json:"sysProxy"`
-	RelayActive bool   `json:"relayActive"`
-	RelayPort   int    `json:"relayPort"`
+	State        string `json:"state"`
+	Transport    string `json:"transport"`
+	NodeLabel    string `json:"nodeLabel"`
+	NodeName     string `json:"nodeName"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	LocalPort    int    `json:"localPort"`
+	Method       string `json:"method"`
+	ListenAddr   string `json:"listenAddr"`
+	SysProxy     bool   `json:"sysProxy"`
+	RelayActive  bool   `json:"relayActive"`
+	RelayPort    int    `json:"relayPort"`
+	ProcessProxy bool   `json:"processProxy"`
 }
 
 type SelectResult struct {
@@ -51,10 +53,12 @@ type PingResult struct {
 }
 
 type ConnectOptions struct {
-	UseSocks5 bool `json:"useSocks5"`
-	AllowLAN  bool `json:"allowLan"`
-	SysProxy  bool `json:"sysProxy"`
-	LocalPort int  `json:"localPort"`
+	UseSocks5    bool     `json:"useSocks5"`
+	AllowLAN     bool     `json:"allowLan"`
+	SysProxy     bool     `json:"sysProxy"`
+	LocalPort    int      `json:"localPort"`
+	ProcessProxy bool     `json:"processProxy"`
+	ProcessNames []string `json:"processNames"`
 }
 
 type Manager struct {
@@ -68,19 +72,36 @@ type Manager struct {
 	relayOn   bool
 	relayPort int
 	sysProxy  bool
+	filter    *sockfilter.Session
 
 	emit func(name string, data ...any)
 }
 
 func NewManager() *Manager {
-	return &Manager{state: StateIdle, opts: ConnectOptions{SysProxy: true}}
+	return &Manager{state: StateIdle, opts: ConnectOptions{SysProxy: true, ProcessNames: []string{}}}
 }
 
 func (m *Manager) SetOptions(opts ConnectOptions) error {
 	if opts.LocalPort != 0 && (opts.LocalPort < 1024 || opts.LocalPort > 65535) {
 		return fmt.Errorf("端口需在 1024-65535 之间，或为 0（默认 %d）", core.LocalProxyPort)
 	}
+	names, err := sockfilter.NormalizeNames(opts.ProcessNames)
+	if err != nil {
+		return err
+	}
+	opts.ProcessNames = names
+	if opts.ProcessProxy {
+		if len(names) == 0 {
+			return errors.New("启用进程代理前请至少填写一个 .exe 文件名")
+		}
+		opts.UseSocks5 = true
+		opts.SysProxy = false
+	}
 	m.mu.Lock()
+	if m.state != StateIdle {
+		m.mu.Unlock()
+		return errors.New("请先断开连接再修改代理选项")
+	}
 	m.opts = opts
 	m.mu.Unlock()
 	if m.emit != nil {
@@ -92,11 +113,14 @@ func (m *Manager) SetOptions(opts ConnectOptions) error {
 func (m *Manager) Options() ConnectOptions {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.opts
+	opts := m.opts
+	opts.ProcessNames = append([]string{}, m.opts.ProcessNames...)
+	return opts
 }
 
 func (m *Manager) SetEmitter(f func(name string, data ...any)) {
 	m.emit = f
+	core.SetGostLogSink(m.log)
 }
 
 func (m *Manager) log(level, msg string) {
@@ -238,6 +262,16 @@ func (m *Manager) Connect() error {
 	}
 	opts := m.opts
 
+	if opts.ProcessProxy {
+		on, err := sysproxy.IsOn()
+		if err != nil {
+			return fmt.Errorf("检查系统代理失败: %w", err)
+		}
+		if on {
+			return errors.New("系统中仍有已启用的系统代理，请手动关闭后再启用进程代理，否则无法保证其余进程直连")
+		}
+	}
+
 	method := "http"
 	if opts.UseSocks5 {
 		method = "socks5"
@@ -280,6 +314,17 @@ func (m *Manager) Connect() error {
 	}
 	m.log("info", fmt.Sprintf("本地代理已启动: %s://%s:%d -> %s:%d", method, listenAddr, localPort, sel.Node.Host, sel.Port))
 
+	if opts.ProcessProxy {
+		filter, err := sockfilter.Start(localPort, opts.ProcessNames, m.log, sockfilter.Options{TCPOnly: sel.Transport == core.TransportWebTransport})
+		if err != nil {
+			m.closeProxyLocked()
+			m.localPort = 0
+			m.log("error", err.Error())
+			return fmt.Errorf("启动进程代理失败: %w", err)
+		}
+		m.filter = filter
+	}
+
 	if opts.SysProxy {
 		if err := sysproxy.On(fmt.Sprintf("127.0.0.1:%d", localPort)); err != nil {
 			m.closeProxyLocked()
@@ -298,6 +343,8 @@ func startProxy(sel *core.Selection, method, listenAddr string, listenPort int) 
 	switch sel.Transport {
 	case core.TransportWebTransport:
 		listenURL := fmt.Sprintf("%s://%s:%d", method, listenAddr, listenPort)
+		// The custom relay+wt server supports TCP only. Do not advertise a
+		// working UDP ASSOCIATE path; SockFilter DNS uses CONNECT instead.
 		forwardURL := fmt.Sprintf("relay+wt://dwg:%s@%s:%d?secure=true", sel.Node.Password, sel.Node.Host, core.GostServerPort)
 		return core.StartGost(listenURL, forwardURL)
 	default:
@@ -316,11 +363,23 @@ func isPortBusy(err error) bool {
 
 func (m *Manager) Disconnect() error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.state != StateConnected {
-		m.mu.Unlock()
 		return errors.New("not connected")
 	}
 
+	// Detach the filter before closing its SOCKS5 upstream, and serialize the
+	// complete teardown against a new Connect / SetOptions / Shutdown.
+	var cleanupErr error
+	if m.filter != nil {
+		cleanupErr = m.filter.Close()
+		m.filter = nil
+		if cleanupErr != nil {
+			m.log("error", fmt.Sprintf("已断开连接，但进程驱动清理未完成: %v", cleanupErr))
+		} else {
+			m.log("info", "进程代理已关闭，驱动已卸载")
+		}
+	}
 	m.state = StateIdle
 	proxyInst := m.proxy
 	relayInst := m.relay
@@ -331,7 +390,6 @@ func (m *Manager) Disconnect() error {
 	m.relayOn = false
 	m.relayPort = 0
 	m.sysProxy = false
-	m.mu.Unlock()
 
 	if hadRelay && relayInst != nil {
 		relayInst.Close()
@@ -355,7 +413,7 @@ func (m *Manager) Disconnect() error {
 	}
 
 	m.emitState()
-	return nil
+	return cleanupErr
 }
 
 func (m *Manager) closeProxyLocked() {
@@ -434,10 +492,11 @@ func (m *Manager) Status() StatusInfo {
 
 func (m *Manager) statusLocked() StatusInfo {
 	info := StatusInfo{
-		State:       "idle",
-		SysProxy:    m.sysProxy,
-		RelayActive: m.relayOn,
-		RelayPort:   m.relayPort,
+		State:        "idle",
+		SysProxy:     m.sysProxy,
+		RelayActive:  m.relayOn,
+		RelayPort:    m.relayPort,
+		ProcessProxy: m.filter != nil,
 	}
 	if m.state == StateConnected {
 		info.State = "connected"
@@ -465,6 +524,13 @@ func (m *Manager) statusLocked() StatusInfo {
 
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.filter != nil {
+		if err := m.filter.Close(); err != nil {
+			m.log("error", fmt.Sprintf("退出时清理进程驱动失败: %v", err))
+		}
+		m.filter = nil
+	}
 	proxyInst := m.proxy
 	relayInst := m.relay
 	hadSysProxy := m.sysProxy
@@ -474,7 +540,6 @@ func (m *Manager) Shutdown() {
 	m.relayPort = 0
 	m.sysProxy = false
 	m.state = StateIdle
-	m.mu.Unlock()
 
 	if relayInst != nil {
 		relayInst.Close()

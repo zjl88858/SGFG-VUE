@@ -52,6 +52,8 @@ tasks:
         vars:
           ARCH: '{{.ARCH}}'
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o "{{.BIN_DIR}}/{{.APP_NAME}}.exe"'
+      - cmd: 'powershell -NoProfile -File build/windows/stage-sockfilter.ps1 -OutputDirectory "{{.BIN_DIR}}/sockfilter" -Architecture "{{.ARCH | default ARCH}}"'
+        platforms: [windows]
       - cmd: powershell Remove-item *.syso
         platforms: [windows]
       - cmd: rm -f *.syso

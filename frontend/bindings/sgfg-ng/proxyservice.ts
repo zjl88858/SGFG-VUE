@@ -3,7 +3,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -30,15 +30,21 @@ export function OpenOptions(): $CancellablePromise<void> {
 }
 
 export function Options(): $CancellablePromise<proxy$0.ConnectOptions> {
-    return $Call.ByID(3411989673);
+    return $Call.ByID(3411989673).then(($result: any) => {
+        return $$createType0($result);
+    });
 }
 
 export function PingSelected(): $CancellablePromise<proxy$0.PingResult> {
-    return $Call.ByID(2130883700);
+    return $Call.ByID(2130883700).then(($result: any) => {
+        return $$createType1($result);
+    });
 }
 
 export function SelectTransport(transport: string): $CancellablePromise<proxy$0.SelectResult> {
-    return $Call.ByID(3057728830, transport);
+    return $Call.ByID(3057728830, transport).then(($result: any) => {
+        return $$createType2($result);
+    });
 }
 
 export function SetOptions(opts: proxy$0.ConnectOptions): $CancellablePromise<string> {
@@ -50,7 +56,9 @@ export function StartRelay(port: number, password: string): $CancellablePromise<
 }
 
 export function Status(): $CancellablePromise<proxy$0.StatusInfo> {
-    return $Call.ByID(4123605683);
+    return $Call.ByID(4123605683).then(($result: any) => {
+        return $$createType3($result);
+    });
 }
 
 export function StopRelay(): $CancellablePromise<string> {
@@ -60,3 +68,9 @@ export function StopRelay(): $CancellablePromise<string> {
 export function Version(): $CancellablePromise<string> {
     return $Call.ByID(181118267);
 }
+
+// Private type creation functions
+const $$createType0 = proxy$0.ConnectOptions.createFrom;
+const $$createType1 = proxy$0.PingResult.createFrom;
+const $$createType2 = proxy$0.SelectResult.createFrom;
+const $$createType3 = proxy$0.StatusInfo.createFrom;

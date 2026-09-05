@@ -43,6 +43,7 @@ const version = ref('')
 const optSocks5 = ref(false)
 const optAllowLan = ref(false)
 const optCustomPort = ref(0)
+const processProxyActive = ref(false)
 
 const flash = ref<'' | 'connect' | 'disconnect'>('')
 const flashKey = ref(0)
@@ -213,6 +214,7 @@ onMounted(async () => {
   })
   onState((s) => {
     connected.value = s.state === 'connected'
+    processProxyActive.value = s.processProxy
     if (s.localPort) localPort.value = s.localPort
     if (s.nodeLabel && connected.value) {
       nodeLabel.value = s.nodeLabel
@@ -232,6 +234,7 @@ onMounted(async () => {
   try {
     const s = await api.status()
     connected.value = s.state === 'connected'
+    processProxyActive.value = s.processProxy
     if (s.localPort) localPort.value = s.localPort
     if (s.transport) {
       activeTransport.value = s.transport
@@ -289,7 +292,7 @@ onUnmounted(() => {
       <div class="topbar card">
         <div class="topbar-status">
           <span class="status-dot" :class="{ on: connected }"></span>
-          <span class="topbar-text">{{ connected ? '已连接' : '未连接' }}</span>
+          <span class="topbar-text">{{ connected ? (processProxyActive ? '已连接 · 进程代理' : '已连接') : '未连接' }}</span>
         </div>
         <TurtleRunner />
         <div class="topbar-node">{{ nodeLabel }}</div>

@@ -17,7 +17,7 @@ type ProxyService struct {
 	optWin *application.WebviewWindow
 }
 
-const Version = "v11.2"
+const Version = "v11.3"
 
 func NewProxyService(mgr *proxy.Manager) *ProxyService {
 	return &ProxyService{mgr: mgr}

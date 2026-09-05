@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import type { ConnectOptions } from '../../bindings/sgfg-ng/internal/proxy/models'
+import { createSerialSaver } from '../serialSaver'
 import { api, onState } from '../bridge'
 import { showToast } from '../toast'
 import { candyBurst } from '../confetti'
@@ -15,6 +17,14 @@ const optSysProxy = ref(true)
 const optAllowLan = ref(false)
 const optSocks5 = ref(false)
 const customPort = ref('')
+const optProcessProxy = ref(false)
+const processNames = ref('')
+const ready = ref(false)
+const pendingSaves = ref(0)
+const saving = computed(() => pendingSaves.value > 0)
+const savedOptions = ref<ConnectOptions | null>(null)
+const saveSnapshot = createSerialSaver<ConnectOptions>(api.setOptions)
+const unsaved = computed(() => ready.value && JSON.stringify(optionSnapshot()) !== JSON.stringify(savedOptions.value))
 
 const relayOn = ref(false)
 const relayBusy = ref(false)
@@ -33,16 +43,28 @@ function showModal(title: string, lines: string[], danger = false) {
 
 const displayPort = ref(7788)
 
-async function save() {
-  const err = await api.setOptions({
+function optionSnapshot(): ConnectOptions {
+  return {
     useSocks5: optSocks5.value,
     allowLan: optAllowLan.value,
     sysProxy: optSysProxy.value,
     localPort: parsePort(customPort.value),
-  } as any)
-  if (err) {
-    showToast('error', err, 2600)
-    await loadOptions()
+    processProxy: optProcessProxy.value,
+    processNames: [...new Set(processNames.value.split(/[\n,;，；]+/).map(s => s.trim().toLowerCase()).filter(Boolean))],
+  }
+}
+
+async function save() {
+  if (!ready.value) return
+  const snapshot = optionSnapshot()
+  pendingSaves.value++
+  try {
+    // Only update the saved baseline. Never write a response into the draft.
+    savedOptions.value = await saveSnapshot(snapshot)
+  } catch (err) {
+    showToast('error', String(err), 3500)
+  } finally {
+    pendingSaves.value--
   }
 }
 
@@ -59,9 +81,24 @@ async function loadOptions() {
     optSysProxy.value = o.sysProxy
     optAllowLan.value = o.allowLan
     optSocks5.value = o.useSocks5
+    optProcessProxy.value = o.processProxy
+    processNames.value = (o.processNames ?? []).join('\n')
     customPort.value = o.localPort > 0 ? String(o.localPort) : ''
     displayPort.value = o.localPort > 0 ? o.localPort : 7788
-  } catch {}
+    savedOptions.value = optionSnapshot()
+    ready.value = true
+  } catch (err) { showToast('error', `读取选项失败，请重新打开窗口：${err}`) }
+}
+
+function discardDraft() {
+  const o = savedOptions.value
+  if (!o || saving.value) return
+  optSysProxy.value = o.sysProxy
+  optAllowLan.value = o.allowLan
+  optSocks5.value = o.useSocks5
+  optProcessProxy.value = o.processProxy
+  processNames.value = o.processNames.join('\n')
+  customPort.value = o.localPort ? String(o.localPort) : ''
 }
 
 function onSysProxyChange(v: boolean) {
@@ -69,6 +106,14 @@ function onSysProxyChange(v: boolean) {
     showModal('提示', ['若关闭系统代理，你需要手动设置代理', `HTTP 127.0.0.1:${displayPort.value}`, '（端口被占用时会自动顺延）'])
   } else if (v) {
     optSocks5.value = false
+  }
+  save()
+}
+
+function onProcessProxyChange(v: boolean) {
+  if (v) {
+    optSocks5.value = true
+    optSysProxy.value = false
   }
   save()
 }
@@ -85,7 +130,6 @@ function onPortCommit() {
   const n = parsePort(customPort.value)
   if (n === -1 || (n !== 0 && (n < 1024 || n > 65535))) {
     showToast('error', '端口需为 1024-65535，或留空使用默认 7788', 2600)
-    loadOptions()
     return
   }
   displayPort.value = n > 0 ? n : 7788
@@ -146,6 +190,10 @@ async function genPassword() {
 }
 
 function closeWindow() {
+  if (saving.value || unsaved.value) {
+    showToast('warn', '请先保存或撤销修改', 3500)
+    return
+  }
   api.closeOptions()
 }
 
@@ -176,9 +224,33 @@ onMounted(async () => {
     <div class="opt-body">
       <section class="card panel">
         <div class="card-title">代理选项</div>
-        <CandyToggle v-model="optSysProxy" label="系统代理" :disabled="connected" @change="onSysProxyChange" />
-        <CandyToggle v-model="optAllowLan" label="允许局域网连入" :disabled="connected" @change="save" />
-        <CandyToggle v-model="optSocks5" label="使用 Socks5" :disabled="connected" @change="onSocks5Change" />
+        <CandyToggle v-model="optSysProxy" label="系统代理" :disabled="!ready || saving || connected || optProcessProxy" @change="onSysProxyChange" />
+        <CandyToggle v-model="optAllowLan" label="允许局域网连入" :disabled="!ready || saving || connected" @change="save" />
+        <CandyToggle v-model="optSocks5" label="使用 Socks5" :disabled="!ready || saving || connected || optProcessProxy" @change="onSocks5Change" />
+      </section>
+
+      <section class="card panel">
+        <div class="card-title">进程代理</div>
+        <label class="hint" for="process-names">进程文件名（每行一个，也可用逗号分隔）</label>
+        <textarea id="process-names" v-model="processNames" class="process-input"
+          placeholder="chrome.exe&#10;firefox.exe" :disabled="!ready || connected" spellcheck="false" />
+        <button class="save-processes" :disabled="!ready || saving || connected" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
+        <button v-if="unsaved && !saving" class="save-processes" @click="discardDraft">撤销修改</button>
+        <div class="hint" role="status">
+          {{ !ready ? '正在加载…' : saving ? '正在保存…' : unsaved ? '有未保存的修改' : connected ? '设置已生效' : '已保存，连接后生效' }}
+        </div>
+        <CandyToggle v-model="optProcessProxy" label="仅代理以上进程" :disabled="!ready || saving || connected" @change="onProcessProxyChange" />
+        <div class="hint">
+          仅代理列表中的应用，其他应用直连。进程名不区分大小写，新建连接生效。
+          连接时自动加载驱动，断开后卸载；与系统代理互斥。设置仅在本次运行中保存。
+        </div>
+        <details class="hint">
+          <summary>功能说明</summary>
+          <p>进程代理需要管理员权限。同名进程均适用，其他名称的子进程需单独添加。</p>
+          <p>DNS（UDP/TCP 53）通过节点使用 1.1.1.1（TCP）；系统 DNS 服务与加密 DNS 不改写。</p>
+          <p>WebTransport 仅支持 TCP，其他非本地 UDP 不转发；Hysteria2 与 Turtleor 支持 UDP。</p>
+          <p>随附驱动为评估版，存在连接数量限制。断开或退出后不再限制应用直连。</p>
+        </details>
       </section>
 
       <section class="card panel">
@@ -187,7 +259,7 @@ onMounted(async () => {
           <CandyInput
             v-model="customPort"
             placeholder="7788"
-            :disabled="connected"
+            :disabled="!ready || saving || connected"
             @blur="onPortCommit"
             @keyup.enter="onPortCommit"
           />
@@ -272,6 +344,33 @@ onMounted(async () => {
 .port-row {
   margin-top: 10px;
   max-width: 180px;
+}
+
+.process-input {
+  display: block;
+  width: 100%;
+  min-height: 76px;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--green-300);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--green-700);
+  font: inherit;
+}
+
+.process-input:disabled { opacity: 0.55; }
+
+.save-processes {
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--green-300);
+  border-radius: 10px;
+  background: var(--green-100);
+  color: var(--green-700);
+  cursor: pointer;
 }
 
 .hint {

@@ -28,8 +28,8 @@ var Nodes = []Node{
 }
 
 const (
-	GostServerPort = 12345
-	LocalProxyPort = 23456
+	GostServerPort = 1443
+	LocalProxyPort = 7788
 
 	LocalProxyPortMaxTry = 10
 

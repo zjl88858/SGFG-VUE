@@ -35,9 +35,9 @@ import (
 
 var (
 	gostMu     sync.Mutex
-	gostLogger = logger_parser.ParseLogger(&config.LoggerConfig{
+	gostLogger = &gostEventLogger{Logger: logger_parser.ParseLogger(&config.LoggerConfig{
 		Log: &config.LogConfig{Level: gostLogLevel(), Output: "stderr"},
-	})
+	})}
 )
 
 func init() {
