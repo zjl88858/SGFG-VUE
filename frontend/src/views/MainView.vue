@@ -4,6 +4,7 @@ import { Window } from '@wailsio/runtime'
 import { api, onLog, onOptions, onScan, onState } from '../bridge'
 import { showToast } from '../toast'
 import { candyBurst } from '../confetti'
+import { formatTraffic } from '../traffic'
 import avatarUrl from '../assets/avatar.png'
 import CandyButton from '../components/CandyButton.vue'
 import ModalDialog from '../components/ModalDialog.vue'
@@ -39,6 +40,17 @@ const scanning = ref(false)
 const scanAttempt = ref(0)
 const scanHost = ref('')
 const version = ref('')
+const traffic = ref({ upload: 0, download: 0 })
+let trafficTimer: number | undefined
+let trafficRequest = 0
+
+async function refreshTraffic() {
+  const request = ++trafficRequest
+  try {
+    const snapshot = await api.traffic()
+    if (request === trafficRequest) traffic.value = snapshot
+  } catch {}
+}
 
 const optSocks5 = ref(false)
 const optAllowLan = ref(false)
@@ -199,6 +211,8 @@ function onGlobalPointerDown(ev: PointerEvent) {
 onMounted(async () => {
   document.addEventListener('pointerdown', onGlobalPointerDown, true)
   pingTimer = window.setInterval(refreshLatency, 10000)
+  trafficTimer = window.setInterval(refreshTraffic, 1000)
+  void refreshTraffic()
   onScan((e) => {
     if (scanning.value && scanHost.value && e.host && e.host !== scanHost.value) {
       showToast('warn', '节点无响应，自动切换节点')
@@ -213,6 +227,7 @@ onMounted(async () => {
     optCustomPort.value = o.localPort
   })
   onState((s) => {
+    void refreshTraffic()
     connected.value = s.state === 'connected'
     processProxyActive.value = s.processProxy
     if (s.localPort) localPort.value = s.localPort
@@ -224,6 +239,13 @@ onMounted(async () => {
   })
   try {
     version.value = await api.version()
+  } catch {}
+  try {
+    const error = await api.settingsError()
+    if (error) {
+      pushLog('error', error)
+      showModal('本地设置读取失败', [error, '当前使用默认设置，原文件未覆盖。修复后请重新启动应用。'], true)
+    }
   } catch {}
   try {
     const o = await api.options()
@@ -250,6 +272,8 @@ onUnmounted(() => {
   document.removeEventListener('pointerdown', onGlobalPointerDown, true)
   if (pingTimer !== undefined) window.clearInterval(pingTimer)
   if (flashTimer !== undefined) window.clearTimeout(flashTimer)
+  if (trafficTimer !== undefined) window.clearInterval(trafficTimer)
+  trafficRequest++
 })
 </script>
 
@@ -339,6 +363,20 @@ onUnmounted(() => {
           </div>
         </section>
 
+        <section class="card panel traffic-panel" title="本次连接经节点转发的数据量，包含进程代理与 SS 中继；下次连接清零">
+          <div class="card-title">代理流量</div>
+          <div class="node-grid">
+            <div class="node-item">
+              <div class="node-key" aria-label="上传" title="上传">↑</div>
+              <div class="node-val">{{ formatTraffic(traffic.upload) }}</div>
+            </div>
+            <div class="node-item">
+              <div class="node-key" aria-label="下载" title="下载">↓</div>
+              <div class="node-val">{{ formatTraffic(traffic.download) }}</div>
+            </div>
+          </div>
+        </section>
+
         <section class="card panel log-panel">
           <div class="card-title">运行日志</div>
           <div class="log-list">
@@ -393,6 +431,10 @@ onUnmounted(() => {
 
 .grid .panel:nth-child(3) {
   animation: rise 0.55s cubic-bezier(0.22, 0.9, 0.36, 1) 0.26s both;
+}
+
+.grid .panel:nth-child(4) {
+  animation: rise 0.55s cubic-bezier(0.22, 0.9, 0.36, 1) 0.32s both;
 }
 
 .menu-item:nth-child(1) {
@@ -641,7 +683,7 @@ onUnmounted(() => {
   flex: 1;
   display: grid;
   grid-template-columns: 1.4fr 1fr;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 14px;
   min-height: 0;
   overflow-y: auto;
@@ -730,6 +772,14 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.traffic-panel {
+  grid-column: 1 / -1;
+}
+
+.traffic-panel .node-val {
+  font-variant-numeric: tabular-nums;
 }
 
 .log-list {

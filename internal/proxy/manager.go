@@ -62,45 +62,44 @@ type ConnectOptions struct {
 }
 
 type Manager struct {
-	mu        sync.Mutex
-	state     State
-	sel       *core.Selection
-	opts      ConnectOptions
-	proxy     any // *core.GostInstance or *core.Hy2Instance
-	localPort int
-	relay     *core.GostInstance
-	relayOn   bool
-	relayPort int
-	sysProxy  bool
-	filter    *sockfilter.Session
+	mu           sync.Mutex
+	state        State
+	sel          *core.Selection
+	opts         ConnectOptions
+	proxy        any // *core.GostInstance or *core.Hy2Instance
+	localPort    int
+	relay        *core.GostInstance
+	relayOn      bool
+	relayPort    int
+	sysProxy     bool
+	filter       *sockfilter.Session
+	traffic      *core.Traffic
+	relayOpts    RelayOptions
+	settingsPath string
+	settingsErr  error
+	passwordKey  func() ([]byte, error)
 
 	emit func(name string, data ...any)
 }
 
 func NewManager() *Manager {
-	return &Manager{state: StateIdle, opts: ConnectOptions{SysProxy: true, ProcessNames: []string{}}}
+	return &Manager{state: StateIdle, opts: ConnectOptions{SysProxy: true, ProcessNames: []string{}}, relayOpts: RelayOptions{Port: 8388}, passwordKey: localPasswordKey}
 }
 
 func (m *Manager) SetOptions(opts ConnectOptions) error {
-	if opts.LocalPort != 0 && (opts.LocalPort < 1024 || opts.LocalPort > 65535) {
-		return fmt.Errorf("端口需在 1024-65535 之间，或为 0（默认 %d）", core.LocalProxyPort)
-	}
-	names, err := sockfilter.NormalizeNames(opts.ProcessNames)
+	var err error
+	opts, err = normalizeOptions(opts)
 	if err != nil {
 		return err
-	}
-	opts.ProcessNames = names
-	if opts.ProcessProxy {
-		if len(names) == 0 {
-			return errors.New("启用进程代理前请至少填写一个 .exe 文件名")
-		}
-		opts.UseSocks5 = true
-		opts.SysProxy = false
 	}
 	m.mu.Lock()
 	if m.state != StateIdle {
 		m.mu.Unlock()
 		return errors.New("请先断开连接再修改代理选项")
+	}
+	if err := m.saveSettingsLocked(opts, m.relayOpts); err != nil {
+		m.mu.Unlock()
+		return err
 	}
 	m.opts = opts
 	m.mu.Unlock()
@@ -108,6 +107,25 @@ func (m *Manager) SetOptions(opts ConnectOptions) error {
 		m.emit("sgfg:options", opts)
 	}
 	return nil
+}
+
+func normalizeOptions(opts ConnectOptions) (ConnectOptions, error) {
+	if opts.LocalPort != 0 && (opts.LocalPort < 1024 || opts.LocalPort > 65535) {
+		return opts, fmt.Errorf("端口需在 1024-65535 之间，或为 0（默认 %d）", core.LocalProxyPort)
+	}
+	names, err := sockfilter.NormalizeNames(opts.ProcessNames)
+	if err != nil {
+		return opts, err
+	}
+	opts.ProcessNames = names
+	if opts.ProcessProxy {
+		if len(names) == 0 {
+			return opts, errors.New("启用进程代理前请至少填写一个 .exe 文件名")
+		}
+		opts.UseSocks5 = true
+		opts.SysProxy = false
+	}
+	return opts, nil
 }
 
 func (m *Manager) Options() ConnectOptions {
@@ -293,8 +311,9 @@ func (m *Manager) Connect() error {
 	var proxyInst any
 	localPort := 0
 	var startErr error
+	traffic := &core.Traffic{}
 	for p := base; p < end; p++ {
-		proxyInst, startErr = startProxy(sel, method, listenAddr, p)
+		proxyInst, startErr = startProxy(sel, method, listenAddr, p, traffic)
 		if startErr == nil {
 			localPort = p
 			break
@@ -335,20 +354,21 @@ func (m *Manager) Connect() error {
 	}
 
 	m.state = StateConnected
+	m.traffic = traffic
 	m.emitState()
 	return nil
 }
 
-func startProxy(sel *core.Selection, method, listenAddr string, listenPort int) (any, error) {
+func startProxy(sel *core.Selection, method, listenAddr string, listenPort int, traffic *core.Traffic) (any, error) {
 	switch sel.Transport {
 	case core.TransportWebTransport:
 		listenURL := fmt.Sprintf("%s://%s:%d", method, listenAddr, listenPort)
 		// The custom relay+wt server supports TCP only. Do not advertise a
 		// working UDP ASSOCIATE path; SockFilter DNS uses CONNECT instead.
 		forwardURL := fmt.Sprintf("relay+wt://dwg:%s@%s:%d?secure=true", sel.Node.Password, sel.Node.Host, core.GostServerPort)
-		return core.StartGost(listenURL, forwardURL)
+		return core.StartGost(listenURL, forwardURL, traffic)
 	default:
-		return core.StartHy2(sel.Node.Host, sel.Port, sel.Node.Password, sel.Transport.ObfsPassword(), method, listenAddr, listenPort)
+		return core.StartHy2(sel.Node.Host, sel.Port, sel.Node.Password, sel.Transport.ObfsPassword(), method, listenAddr, listenPort, traffic)
 	}
 }
 
@@ -412,6 +432,7 @@ func (m *Manager) Disconnect() error {
 		}
 	}
 
+	m.traffic.Freeze()
 	m.emitState()
 	return cleanupErr
 }
@@ -443,6 +464,11 @@ func (m *Manager) StartRelay(port int, password string) error {
 	if password == "" {
 		return errors.New("密码不能为空")
 	}
+	relayOpts := RelayOptions{Port: port, Password: password}
+	if err := m.saveSettingsLocked(m.opts, relayOpts); err != nil {
+		return err
+	}
+	m.relayOpts = relayOpts
 
 	method := "http"
 	if m.opts.UseSocks5 {
@@ -451,6 +477,11 @@ func (m *Manager) StartRelay(port int, password string) error {
 	userinfo := url.UserPassword("aes-128-gcm", password)
 	listenURL := fmt.Sprintf("ss://%s@0.0.0.0:%d", userinfo.String(), port)
 	forwardURL := fmt.Sprintf("%s://127.0.0.1:%d", method, m.localPort)
+	if method == "socks5" {
+		// The loopback listener is plain SOCKS5. GOST's optional SOCKS TLS
+		// extension can otherwise negotiate TLS against a listener with no cert.
+		forwardURL += "?notls=true"
+	}
 	inst, err := core.StartGost(listenURL, forwardURL)
 	if err != nil {
 		return fmt.Errorf("启动中继失败: %w", err)
@@ -488,6 +519,13 @@ func (m *Manager) Status() StatusInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.statusLocked()
+}
+
+func (m *Manager) Traffic() core.TrafficSnapshot {
+	m.mu.Lock()
+	t := m.traffic
+	m.mu.Unlock()
+	return t.Snapshot()
 }
 
 func (m *Manager) statusLocked() StatusInfo {
@@ -553,4 +591,5 @@ func (m *Manager) Shutdown() {
 	if hadSysProxy {
 		sysproxy.Off()
 	}
+	m.traffic.Freeze()
 }

@@ -39,7 +39,7 @@ type Hy2Instance struct {
 	OnConnected func(info string)
 }
 
-func StartHy2(server string, port int, auth, obfsPassword, method, listenAddr string, listenPort int) (*Hy2Instance, error) {
+func StartHy2(server string, port int, auth, obfsPassword, method, listenAddr string, listenPort int, traffic ...*Traffic) (*Hy2Instance, error) {
 	host := server
 	serverAddr := fmt.Sprintf("%s:%d", server, port)
 
@@ -69,6 +69,9 @@ func StartHy2(server string, port int, auth, obfsPassword, method, listenAddr st
 		return nil, err
 	}
 	inst.client = client
+	if len(traffic) > 0 && traffic[0] != nil {
+		inst.client = &trafficHyClient{Client: client, traffic: traffic[0]}
+	}
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", listenAddr, listenPort))
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-gost/core/connector"
 	"github.com/go-gost/core/logger"
 	"github.com/go-gost/core/service"
 	"github.com/go-gost/x/config"
@@ -16,7 +17,7 @@ import (
 	"github.com/go-gost/x/registry"
 
 	_ "github.com/go-gost/x/connector/http"
-	_ "github.com/go-gost/x/connector/relay"
+	relay_connector "github.com/go-gost/x/connector/relay"
 	_ "github.com/go-gost/x/connector/socks/v5"
 	_ "github.com/go-gost/x/connector/ss"
 	_ "github.com/go-gost/x/connector/ss/udp"
@@ -52,12 +53,13 @@ func gostLogLevel() string {
 }
 
 type GostInstance struct {
-	id     string
-	svcs   []service.Service
-	chains []string
+	id         string
+	svcs       []service.Service
+	chains     []string
+	connectors []string
 }
 
-func StartGost(listenURL, forwardURL string) (*GostInstance, error) {
+func StartGost(listenURL, forwardURL string, traffic ...*Traffic) (*GostInstance, error) {
 	gostMu.Lock()
 	defer gostMu.Unlock()
 
@@ -71,6 +73,24 @@ func StartGost(listenURL, forwardURL string) (*GostInstance, error) {
 	}
 
 	inst := &GostInstance{id: fmt.Sprintf("sgfg-%d", time.Now().UnixNano())}
+	if len(traffic) > 0 && traffic[0] != nil {
+		name := inst.id + "-metered-relay"
+		if err := registry.ConnectorRegistry().Register(name, func(opts ...connector.Option) connector.Connector {
+			return &trafficConnector{Connector: relay_connector.NewConnector(opts...), traffic: traffic[0]}
+		}); err != nil {
+			return nil, err
+		}
+		inst.connectors = append(inst.connectors, name)
+		for _, c := range cfg.Chains {
+			for _, h := range c.Hops {
+				for _, n := range h.Nodes {
+					if n.Connector != nil && n.Connector.Type == "relay" {
+						n.Connector.Type = name
+					}
+				}
+			}
+		}
+	}
 
 	for _, c := range cfg.Chains {
 		c.Name = inst.id + "-" + c.Name
@@ -132,4 +152,8 @@ func (g *GostInstance) cleanup() {
 		registry.ChainRegistry().Unregister(name)
 	}
 	g.chains = nil
+	for _, name := range g.connectors {
+		registry.ConnectorRegistry().Unregister(name)
+	}
+	g.connectors = nil
 }

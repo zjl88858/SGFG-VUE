@@ -8,10 +8,10 @@ info:
   companyName: "SGFG" # The name of the company
   productName: "SGFG-NG" # The name of the application
   productIdentifier: "run.sgfg.sgfgng" # The unique product identifier
-  description: "��귭��?NextGen ˽�˴�������" # The application description
+  description: "��귭��?NextGen ˽�˴�������" # The application description
   copyright: "(c) 2026, SGFG" # Copyright text
   comments: "SGFG-NG" # Comments
-  version: "11.2.0" # The application version
+  version: "11.3.1" # The application version
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension
   #                               # If not set and Assets.car exists, defaults to "appicon"

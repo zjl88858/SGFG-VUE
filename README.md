@@ -2,7 +2,7 @@
 
 A proxy client for Windows, written in Go. [GoST v3](https://github.com/go-gost/gost) and [Hysteria2](https://github.com/apernet/hysteria) are compiled into the application as Go libraries — no external proxy core processes. Optional process proxying uses a separate NetFilter SDK runtime and kernel driver. The UI is built with Wails v3 + Vue 3 + TypeScript in a light-green candy theme.
 
-**Current version: v11.3**
+**Current version: v11.3.1**
 
 > ## Server Configuration and Licensing
 >
@@ -26,6 +26,39 @@ A proxy client for Windows, written in Go. [GoST v3](https://github.com/go-gost/
 | Options window | Separate Wails window for proxy options, custom port, and the SS relay |
 | SS LAN relay | After connecting, exposes a `ss://aes-128-gcm` entrance forwarding to the local proxy, so other LAN devices can share the connection |
 | Password generator | Random relay passwords (8-16 alphanumeric characters) |
+| Traffic usage | Live upload/download totals for the current proxy connection, covering WebTransport, Hysteria2 and Turtleor, including process proxy and SS relay traffic |
+| Local preferences | Proxy switches, process list, requested local port, and SS relay port/password survive application restarts; node selection and traffic totals are never saved |
+
+## Traffic usage and local preferences (v11.3.1)
+
+### Upload and download
+
+The main window displays separate **upload** (application → node) and **download** (node → application) totals, refreshed approximately once per second in B/KiB/MiB/GiB units. A successful new proxy connection starts fresh counters; disconnecting freezes the last totals for viewing. Restarting the application resets them to zero. A failed connection attempt does not erase the preceding session's display.
+
+Counting occurs at the remote proxy connection's application-data interface: GOST relay TCP streams for WebTransport, and Hysteria client TCP streams/UDP payloads for Hysteria2 and Turtleor. Process-proxy traffic, captured DNS forwarded through the node, explicit local proxy clients and SS relay clients share this boundary. The SS-to-local-proxy forwarding stage is not counted again, so relayed traffic contributes once. Bypassed traffic, node-selection probes, proxy authentication, QUIC encryption/framing and transport retransmissions are excluded. Application protocol headers (for example HTTP and DNS-over-TCP framing) are included. These are application-level transfer counters, not a network-adapter or ISP billing measurement, and an accepted write does not prove delivery to the final server.
+
+### Saved settings
+
+Settings are stored in **`%APPDATA%\SGFG\settings.json`** on Windows (Go's `os.UserConfigDir()` for the account running the application). Moving/upgrading the executable does not change this location. The file is created on the first successful settings save; an absent file uses the default options and relay port 8388.
+
+| Saved locally | Restored behavior |
+|---|---|
+| System proxy, allow LAN access, use SOCKS5 | Restore the three proxy-option switches; apply when connecting |
+| Process proxy enabled and executable list | Restore the mode and normalized exact filenames; process mode uses SOCKS5 and disables the system-proxy option |
+| Local listening port | Restore the requested port; 0 means default 7788. An automatically incremented runtime port is not saved over the requested value |
+| SS relay port and password | Restore the fields, including a generated password, without automatically enabling the relay |
+
+Transport/node selection, connection/relay activation, latency and upload/download totals remain runtime-only. Startup does not connect or select a node automatically.
+
+Proxy switches and committed local-port edits save automatically; use **Save settings** for process-list edits. SS port/password edits save on field commit, password generation, **Save relay settings**, or before enabling the relay. Pending or failed saves retain the draft and are shown in the options window; closing via its title bar checks for unsaved changes. Proxy options require disconnecting before editing, while relay settings can be changed with the main proxy connected as long as the relay is stopped.
+
+The backend validates preferences and writes a same-directory temporary file before replacing the configuration. Failed writes leave the previous in-memory settings and file intact. Malformed, unsupported or unreadable settings produce a visible startup error and use defaults without silently replacing the original file; repair or move the file and restart before saving again. To reset preferences, exit the application and remove this file.
+
+**The SS password is encrypted locally with AES-128-GCM.** A 128-bit key is derived from SHA-256 of an application-specific purpose string, Windows `MachineGuid` and the current account's SID. Each save uses a fresh cryptographically random 96-bit nonce and a 128-bit authentication tag; the JSON stores a versioned Base64 envelope in `relay.passwordEncrypted`, never the key or plaintext password. Other preferences remain ordinary JSON. The password is decrypted in memory for the options window and SS relay; neither the password nor the machine/account identifiers are uploaded.
+
+This is lightweight machine/account-bound protection, not a credential vault: these identifiers are not secrets, and software able to read them and the configuration can reproduce the key. Copying the configuration to another machine/account, reinstalling Windows, or changing those identifiers prevents normal decryption. Moving or updating the executable on the same installation/account does not. Running under a different administrator account also uses that account's configuration directory.
+
+The settings schema is now **version 2**. On startup, valid version-1 plaintext settings are automatically encrypted and replaced using the same temporary-file save mechanism, without losing other preferences. A failure to obtain the machine identity, encrypt, write, or authenticate ciphertext is reported; there is no plaintext fallback and no silent replacement of the original file. Repair or move an unreadable configuration and restart, then re-enter the relay password. An empty saved password needs no machine identity. Earlier plaintext backups are not rewritten by this migration.
 
 ## Tech Stack
 
@@ -130,7 +163,7 @@ Use the **x64 C API** `nfapi.dll`, not the SDK's C++ or Win32 DLL. The applicati
 
 Only the SGFG-owned service/file is managed. An existing vendor service named `sockfilter`, Proxifier services, and other drivers are not overwritten or removed. A cross-process guard prevents two SGFG instances from managing the same driver simultaneously. Startup failure rolls back newly installed resources; after abnormal termination, the next process-proxy connection attempts recovery of its own stale driver. A blocked unload/deletion is reported rather than claimed successful, and may require closing other tools or restarting Windows. The application never changes Secure Boot, memory integrity, signature enforcement or test-signing settings.
 
-DNS scope is limited to captured queries from selected processes. Windows DNS Client service traffic (usually `svchost.exe`), DoH/DoT, and ordinary HTTP/SOCKS5 domain resolution are not globally rewritten. The fixed public DNS resolver cannot resolve private enterprise-only names. This feature is not a kill switch; disconnecting or crashing may allow new direct connections. Options currently remain in memory for the application session.
+DNS scope is limited to captured queries from selected processes. Windows DNS Client service traffic (usually `svchost.exe`), DoH/DoT, and ordinary HTTP/SOCKS5 domain resolution are not globally rewritten. The fixed public DNS resolver cannot resolve private enterprise-only names. This feature is not a kill switch; disconnecting or crashing may allow new direct connections. Since v11.3.1, preferences are saved locally as described above; connection state and traffic remain in memory only.
 
 ### Driver requirements and safety
 

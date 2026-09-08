@@ -1,6 +1,6 @@
 import { Events } from '@wailsio/runtime'
 import { ProxyService } from '../bindings/sgfg-ng'
-import type { ConnectOptions } from '../bindings/sgfg-ng/internal/proxy/models'
+import type { ConnectOptions, RelayOptions } from '../bindings/sgfg-ng/internal/proxy/models'
 import type { StatusInfo } from '../bindings/sgfg-ng/internal/proxy/models'
 
 export interface LogEntry {
@@ -13,6 +13,10 @@ export const api = {
   pingSelected: () => ProxyService.PingSelected(),
   setOptions: (o: ConnectOptions) => ProxyService.SetOptions(o),
   options: () => ProxyService.Options(),
+  relayOptions: () => ProxyService.RelayOptions(),
+  setRelayOptions: (o: RelayOptions) => ProxyService.SetRelayOptions(o),
+  settingsError: () => ProxyService.SettingsError(),
+  traffic: () => ProxyService.Traffic(),
   connect: () => ProxyService.Connect(),
   disconnect: () => ProxyService.Disconnect(),
   startRelay: (port: number, password: string) => ProxyService.StartRelay(port, password),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import type { ConnectOptions } from '../../bindings/sgfg-ng/internal/proxy/models'
+import type { ConnectOptions, RelayOptions } from '../../bindings/sgfg-ng/internal/proxy/models'
 import { createSerialSaver } from '../serialSaver'
 import { api, onState } from '../bridge'
 import { showToast } from '../toast'
@@ -31,6 +31,34 @@ const relayBusy = ref(false)
 const relayPort = ref('8388')
 const relayPassword = ref('')
 const diceSpin = ref(false)
+const relayPending = ref(0)
+const relaySaving = computed(() => relayPending.value > 0)
+const savedRelay = ref<RelayOptions | null>(null)
+const saveRelaySnapshot = createSerialSaver<RelayOptions>(api.setRelayOptions)
+const relayUnsaved = computed(() => ready.value && JSON.stringify(relaySnapshot()) !== JSON.stringify(savedRelay.value))
+
+function relaySnapshot(): RelayOptions {
+  return { port: parsePort(relayPort.value), password: relayPassword.value }
+}
+
+async function saveRelay(): Promise<boolean> {
+  if (!ready.value) return false
+  const snapshot = relaySnapshot()
+  relayPending.value++
+  try {
+    savedRelay.value = await saveRelaySnapshot(snapshot)
+    return true
+  } catch (err) {
+    showToast('error', String(err), 3500)
+    return false
+  } finally { relayPending.value-- }
+}
+
+function discardRelay() {
+  if (!savedRelay.value || relaySaving.value) return
+  relayPort.value = String(savedRelay.value.port)
+  relayPassword.value = savedRelay.value.password
+}
 
 const modal = reactive({ open: false, title: '', lines: [] as string[], danger: false })
 
@@ -71,13 +99,12 @@ async function save() {
 function parsePort(s: string): number {
   const t = s.trim()
   if (!t) return 0
-  const n = parseInt(t, 10)
-  return Number.isNaN(n) ? -1 : n
+  return /^\d+$/.test(t) ? Number(t) : -1
 }
 
 async function loadOptions() {
   try {
-    const o = await api.options()
+    const [o, r] = await Promise.all([api.options(), api.relayOptions()])
     optSysProxy.value = o.sysProxy
     optAllowLan.value = o.allowLan
     optSocks5.value = o.useSocks5
@@ -86,6 +113,9 @@ async function loadOptions() {
     customPort.value = o.localPort > 0 ? String(o.localPort) : ''
     displayPort.value = o.localPort > 0 ? o.localPort : 7788
     savedOptions.value = optionSnapshot()
+    relayPort.value = String(r.port)
+    relayPassword.value = r.password
+    savedRelay.value = relaySnapshot()
     ready.value = true
   } catch (err) { showToast('error', `读取选项失败，请重新打开窗口：${err}`) }
 }
@@ -146,7 +176,7 @@ async function onRelayChange(v: boolean) {
   relayBusy.value = true
   try {
     if (v) {
-      const port = parseInt(relayPort.value, 10)
+      const port = parsePort(relayPort.value)
       if (!port || port < 1 || port > 65535) {
         showToast('error', '中继端口无效')
         relayOn.value = false
@@ -157,6 +187,7 @@ async function onRelayChange(v: boolean) {
         relayOn.value = false
         return
       }
+      if (!(await saveRelay())) { relayOn.value = false; return }
       const err = await api.startRelay(port, relayPassword.value)
       if (err) {
         showToast('error', err)
@@ -184,13 +215,14 @@ async function genPassword() {
   window.setTimeout(() => (diceSpin.value = false), 500)
   try {
     relayPassword.value = await api.generatePassword()
+    await saveRelay()
   } catch {
     showToast('error', '密码生成失败')
   }
 }
 
 function closeWindow() {
-  if (saving.value || unsaved.value) {
+  if (saving.value || unsaved.value || relaySaving.value || relayUnsaved.value || relayBusy.value) {
     showToast('warn', '请先保存或撤销修改', 3500)
     return
   }
@@ -242,7 +274,7 @@ onMounted(async () => {
         <CandyToggle v-model="optProcessProxy" label="仅代理以上进程" :disabled="!ready || saving || connected" @change="onProcessProxyChange" />
         <div class="hint">
           仅代理列表中的应用，其他应用直连。进程名不区分大小写，新建连接生效。
-          连接时自动加载驱动，断开后卸载；与系统代理互斥。设置仅在本次运行中保存。
+          连接时自动加载驱动，断开后卸载；与系统代理互斥。设置保存在本机，下次启动自动恢复。
         </div>
         <details class="hint">
           <summary>功能说明</summary>
@@ -273,14 +305,17 @@ onMounted(async () => {
 
       <section class="card panel">
         <div class="card-title">SS 局域网中继</div>
-        <CandyToggle v-model="relayOn" label="开启中继" @change="onRelayChange" />
+        <CandyToggle v-model="relayOn" label="开启中继" :disabled="!ready || relaySaving || relayBusy" @change="onRelayChange" />
         <div class="relay-row">
-          <CandyInput v-model="relayPort" placeholder="端口" :disabled="relayOn" />
-          <CandyInput v-model="relayPassword" placeholder="密码" :disabled="relayOn" />
-          <button class="dice-btn" :class="{ spin: diceSpin }" :disabled="relayOn" title="生成密码" @click="genPassword">
+          <CandyInput v-model="relayPort" placeholder="端口" :disabled="!ready || relayOn || relayBusy" @blur="saveRelay" @keyup.enter="saveRelay" />
+          <CandyInput v-model="relayPassword" placeholder="密码" :disabled="!ready || relayOn || relayBusy" @blur="saveRelay" @keyup.enter="saveRelay" />
+          <button class="dice-btn" :class="{ spin: diceSpin }" :disabled="!ready || relayOn || relayBusy || relaySaving || diceSpin" title="生成密码" @click="genPassword">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="8.5" cy="15.5" r="1.3" fill="currentColor" stroke="none"/></svg>
           </button>
         </div>
+        <button class="save-processes" :disabled="!ready || relayOn || relayBusy || relaySaving" @click="saveRelay">{{ relaySaving ? '保存中…' : '保存中继设置' }}</button>
+        <button v-if="relayUnsaved && !relaySaving && !relayOn" class="save-processes" @click="discardRelay">撤销修改</button>
+        <div class="hint" role="status">{{ relaySaving ? '正在保存…' : relayUnsaved ? '有未保存的修改' : ready ? '已保存到本机（密码加密）' : '正在加载…' }} · 中继需手动开启</div>
       </section>
     </div>
 
