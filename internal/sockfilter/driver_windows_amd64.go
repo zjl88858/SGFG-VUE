@@ -27,7 +27,7 @@ type scmDriver struct {
 
 func acquireDriver() (*driverLease, error) {
 	if !windows.GetCurrentProcessToken().IsElevated() {
-		return nil, fmt.Errorf("进程代理需要管理员权限，请以管理员身份启动应用")
+		return nil, fmt.Errorf("驱动 helper 未获得管理员权限，请允许进程代理的 UAC 请求")
 	}
 	// A named event is a cross-process ownership guard with no OS-thread
 	// affinity. Do not unload a driver while another SGFG instance owns it.

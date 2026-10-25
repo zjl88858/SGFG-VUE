@@ -17,7 +17,7 @@ type ProxyService struct {
 	optWin *application.WebviewWindow
 }
 
-const Version = "v11.3"
+const Version = "v11.4"
 
 func NewProxyService(mgr *proxy.Manager) *ProxyService {
 	return &ProxyService{mgr: mgr}
@@ -49,6 +49,21 @@ func (s *ProxyService) SetOptions(opts proxy.ConnectOptions) string {
 func (s *ProxyService) Options() proxy.ConnectOptions {
 	return s.mgr.Options()
 }
+
+func (s *ProxyService) RelayOptions() proxy.RelayOptions {
+	return s.mgr.RelayOptions()
+}
+
+func (s *ProxyService) SetRelayOptions(opts proxy.RelayOptions) string {
+	if err := s.mgr.SetRelayOptions(opts); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (s *ProxyService) SettingsError() string { return s.mgr.SettingsError() }
+
+func (s *ProxyService) Traffic() core.TrafficSnapshot { return s.mgr.Traffic() }
 
 func (s *ProxyService) Connect() string {
 	if err := s.mgr.Connect(); err != nil {

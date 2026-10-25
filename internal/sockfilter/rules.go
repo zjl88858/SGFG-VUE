@@ -52,10 +52,18 @@ func processRule(name string, protocol uint32, flags uint32) rule {
 	return r
 }
 
-func makeRules(names []string, pid uint32) []rule {
+func makeRules(names []string, pid uint32, extraPIDs ...uint32) []rule {
 	var own rule
 	binary.LittleEndian.PutUint32(own[4:8], pid)
 	rules := []rule{own} // NF_ALLOW, even if the user selects this executable.
+	for _, extra := range extraPIDs {
+		if extra == 0 || extra == pid {
+			continue
+		}
+		var allow rule
+		binary.LittleEndian.PutUint32(allow[4:8], extra)
+		rules = append(rules, allow)
+	}
 	for _, name := range names {
 		rules = append(rules, processRule(name, 6, 16), processRule(name, 17, 2))
 	}

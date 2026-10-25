@@ -31,10 +31,11 @@ func loadSDK() (*sdk, error) {
 	}
 	path := filepath.Join(filepath.Dir(exe), "sockfilter", "nfapi.dll")
 	// Absolute path only: never search PATH or the current working directory.
-	dll, err := windows.LoadDLL(path)
+	h, err := windows.LoadLibraryEx(path, 0, windows.LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|windows.LOAD_LIBRARY_SEARCH_SYSTEM32)
 	if err != nil {
 		return nil, fmt.Errorf("加载进程代理组件失败: %w；请确认应用目录中的 sockfilter/nfapi.dll 完整", err)
 	}
+	dll := &windows.DLL{Name: path, Handle: h}
 	s := &sdk{dll: dll, procs: make(map[string]*windows.Proc)}
 	for _, name := range []string{"nf_init", "nf_free", "nf_setOptions", "nf_setRulesEx", "nf_deleteRules", "nf_tcpPostSend", "nf_tcpPostReceive", "nf_udpPostSend", "nf_udpPostReceive", "nf_getDriverType"} {
 		p, err := dll.FindProc(name)

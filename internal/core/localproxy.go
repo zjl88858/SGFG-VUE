@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -54,7 +55,7 @@ func handleSocks5(conn net.Conn, hy hyclient.Client) {
 		conn.SetDeadline(time.Time{})
 		relay(conn, remote)
 	case 0x03: // UDP ASSOCIATE
-		handleUDPAssociate(conn, hy, buf)
+		handleUDPAssociate(conn, hy, target)
 	default:
 		conn.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 	}
@@ -92,7 +93,39 @@ func readSocksAddr(r io.Reader, buf []byte) (string, error) {
 	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(buf[:2])))), nil
 }
 
-func handleUDPAssociate(tcpConn net.Conn, hy hyclient.Client, buf []byte) {
+// Bind the association before accepting any datagrams. Never infer a local
+// client's port from its first packet: another local process can win that race.
+func udpAssociateClient(peer net.Addr, requested string) (netip.AddrPort, error) {
+	if peer == nil {
+		return netip.AddrPort{}, fmt.Errorf("missing SOCKS TCP peer")
+	}
+	tcp, err := netip.ParseAddrPort(peer.String())
+	if err != nil {
+		return netip.AddrPort{}, err
+	}
+	udp, err := netip.ParseAddrPort(requested)
+	if err != nil || udp.Port() == 0 {
+		return netip.AddrPort{}, fmt.Errorf("SOCKS UDP requires an IP address and a nonzero source port")
+	}
+	peerIP := tcp.Addr().Unmap()
+	ip := udp.Addr().Unmap()
+	if ip.IsUnspecified() {
+		ip = peerIP
+	}
+	if ip != peerIP {
+		return netip.AddrPort{}, fmt.Errorf("SOCKS UDP source must match the TCP peer")
+	}
+	return netip.AddrPortFrom(ip, udp.Port()), nil
+}
+
+func handleUDPAssociate(tcpConn net.Conn, hy hyclient.Client, requested string) {
+	client, err := udpAssociateClient(tcpConn.RemoteAddr(), requested)
+	if err != nil {
+		// Policy rejection, not an invitation to claim the session by sending
+		// the first UDP packet. TCP CONNECT and existing helper requests are unchanged.
+		tcpConn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		return
+	}
 	bindIP := net.ParseIP("127.0.0.1")
 	if ta, ok := tcpConn.LocalAddr().(*net.TCPAddr); ok && ta.IP != nil {
 		bindIP = ta.IP
@@ -112,9 +145,8 @@ func handleUDPAssociate(tcpConn net.Conn, hy hyclient.Client, buf []byte) {
 	defer hyUDP.Close()
 
 	local := udpLn.LocalAddr().(*net.UDPAddr)
-	reply := []byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
-	copy(reply[4:8], local.IP.To4())
-	binary.BigEndian.PutUint16(reply[8:10], uint16(local.Port))
+	reply := buildUDPRelayHeader(local.String())
+	reply[0] = 0x05 // Same address encoding; VER, REP=success, RSV.
 	tcpConn.SetDeadline(time.Time{})
 	if _, err := tcpConn.Write(reply); err != nil {
 		return
@@ -124,9 +156,6 @@ func handleUDPAssociate(tcpConn net.Conn, hy hyclient.Client, buf []byte) {
 	var once sync.Once
 	stop := func() { once.Do(func() { close(done); udpLn.Close(); hyUDP.Close() }) }
 
-	var addrMu sync.RWMutex
-	var clientAddr *net.UDPAddr
-
 	go func() {
 		io.Copy(io.Discard, tcpConn) // association ends when TCP closes
 		stop()
@@ -135,16 +164,17 @@ func handleUDPAssociate(tcpConn net.Conn, hy hyclient.Client, buf []byte) {
 	go func() { // client -> remote
 		pkt := make([]byte, 65535)
 		for {
-			n, from, err := udpLn.ReadFromUDP(pkt)
+			n, from, err := udpLn.ReadFromUDPAddrPort(pkt)
 			if err != nil {
 				stop()
 				return
 			}
-			addrMu.Lock()
-			clientAddr = from
-			addrMu.Unlock()
+			from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
+			if from != client {
+				continue
+			}
 			data := pkt[:n]
-			if len(data) < 4 || data[2] != 0x00 { // FRAG must be 0
+			if len(data) < 4 || data[0] != 0 || data[1] != 0 || data[2] != 0 { // RSV and FRAG must be 0
 				continue
 			}
 			addr, hdrLen, err := parseUDPRelayHeader(data)
@@ -169,12 +199,7 @@ func handleUDPAssociate(tcpConn net.Conn, hy hyclient.Client, buf []byte) {
 				continue
 			}
 			pkt := append(hdr, data...)
-			addrMu.RLock()
-			to := clientAddr
-			addrMu.RUnlock()
-			if to != nil {
-				udpLn.WriteToUDP(pkt, to)
-			}
+			udpLn.WriteToUDPAddrPort(pkt, client)
 		}
 	}()
 
@@ -271,7 +296,7 @@ func handleHTTP(conn net.Conn, hy hyclient.Client) {
 		resp := &http.Response{
 			StatusCode: http.StatusMethodNotAllowed,
 			ProtoMajor: 1, ProtoMinor: 1,
-			Body: io.NopCloser(&emptyReader{}),
+			Body:   io.NopCloser(&emptyReader{}),
 			Header: make(http.Header),
 		}
 		resp.Write(conn)

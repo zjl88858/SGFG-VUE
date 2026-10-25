@@ -1,8 +1,14 @@
 # SGFG-VUE
 
-A proxy client for Windows, written in Go. [GoST v3](https://github.com/go-gost/gost) and [Hysteria2](https://github.com/apernet/hysteria) are compiled into the application as Go libraries — no external proxy core processes. Optional process proxying uses a separate NetFilter SDK runtime and kernel driver. The UI is built with Wails v3 + Vue 3 + TypeScript in a light-green candy theme.
+A proxy client for Windows, written in Go. [GoST v3](https://github.com/go-gost/gost) and [Hysteria2](https://github.com/apernet/hysteria) are compiled into the ordinary-user GUI process as Go libraries — no external proxy core processes. Optional process proxying uses a separate elevated driver helper, NetFilter SDK runtime and kernel driver. The UI is built with Wails v3 + Vue 3 + TypeScript in a light-green candy theme.
 
-**Current version: v11.3.1**
+**Current version: v11.4**
+
+### What's new in v11.4
+
+- Split process filtering into the independently elevated `sgfg-driver-helper.exe`; the GUI, WebView2, node-facing proxy, local preferences and HKCU system-proxy settings remain in the ordinary user's process.
+- Request UAC only when connecting with process proxy enabled, avoiding the temporary administrator profile used by Windows Administrator Protection. Normal HTTP/SOCKS5 and system-proxy use require no elevation.
+- Add local named-pipe process-identity checks, heartbeat/parent-exit cleanup, helper-failure handling and separate build manifests for the two executables. See [Privilege separation and Windows Administrator Protection](#privilege-separation-and-windows-administrator-protection) for deployment and security boundaries.
 
 > ## Server Configuration and Licensing
 >
@@ -21,7 +27,7 @@ A proxy client for Windows, written in Go. [GoST v3](https://github.com/go-gost/
 | Local proxy | HTTP or SOCKS5 (mutually exclusive), listening on 127.0.0.1 or 0.0.0.0 (LAN access), default port 7788 with automatic increment if occupied |
 | System proxy | Automatically sets/restores the Windows system proxy on connect/disconnect; detects and repairs stale settings after abnormal exits |
 | Process proxy | Windows x64: proxy selected `.exe` names; other processes bypass. Case-insensitive exact filenames, including future instances. Mutually exclusive with the system proxy |
-| Driver lifecycle | When process proxy is enabled, connecting installs and starts the application-owned demand-start driver; disconnecting detaches filtering, unloads the driver and removes its service/file. Normal proxy connections do not install a driver |
+| Driver lifecycle | Only connecting with process proxy enabled requests UAC for a headless helper. It manages the application-owned demand-start driver and filtering, then unloads/removes the driver on disconnect. The GUI and remote proxy core stay unelevated |
 | Process DNS | Captured UDP/TCP port 53 requests use `tcp://1.1.1.1:53` through the selected node; UDP requests are translated to TCP and replies restored to the original DNS peer |
 | Options window | Separate Wails window for proxy options, custom port, and the SS relay |
 | SS LAN relay | After connecting, exposes a `ss://aes-128-gcm` entrance forwarding to the local proxy, so other LAN devices can share the connection |
@@ -56,7 +62,7 @@ The backend validates preferences and writes a same-directory temporary file bef
 
 **The SS password is encrypted locally with AES-128-GCM.** A 128-bit key is derived from SHA-256 of an application-specific purpose string, Windows `MachineGuid` and the current account's SID. Each save uses a fresh cryptographically random 96-bit nonce and a 128-bit authentication tag; the JSON stores a versioned Base64 envelope in `relay.passwordEncrypted`, never the key or plaintext password. Other preferences remain ordinary JSON. The password is decrypted in memory for the options window and SS relay; neither the password nor the machine/account identifiers are uploaded.
 
-This is lightweight machine/account-bound protection, not a credential vault: these identifiers are not secrets, and software able to read them and the configuration can reproduce the key. Copying the configuration to another machine/account, reinstalling Windows, or changing those identifiers prevents normal decryption. Moving or updating the executable on the same installation/account does not. Running under a different administrator account also uses that account's configuration directory.
+This is lightweight machine/account-bound protection, not a credential vault: these identifiers are not secrets, and software able to read them and the configuration can reproduce the key. Copying the configuration to another machine/account, reinstalling Windows, or changing those identifiers prevents normal decryption. Moving or updating the executable on the same installation/account does not. The GUI must run as the interactive user; the elevated helper never reads these settings or decrypts the SS password. Configuration previously saved under a different or temporary administrator account is not automatically imported.
 
 The settings schema is now **version 2**. On startup, valid version-1 plaintext settings are automatically encrypted and replaced using the same temporary-file save mechanism, without losing other preferences. A failure to obtain the machine identity, encrypt, write, or authenticate ciphertext is reported; there is no plaintext fallback and no silent replacement of the original file. Repair or move an unreadable configuration and restart, then re-enter the relay password. An empty saved password needs no machine identity. Earlier plaintext backups are not rewritten by this migration.
 
@@ -109,7 +115,7 @@ Server-side requirements:
 | Bun | 1.x, available in `PATH` |
 | Wails CLI | `v3.0.0-alpha2.117`, aligned with `go.mod` |
 | WebView2 Runtime | required at runtime (preinstalled on most Win10/11 systems) |
-| Administrator privileges | The Windows 11.3 executable requests elevation at startup to manage its kernel driver; UAC/security policies are not bypassed |
+| Administrator privileges | Launch the GUI normally, not as administrator. Only the separate process-filter helper requests UAC when connecting in process-proxy mode; UAC/security policies are not bypassed |
 | NetFilter SDK (optional) | Compatible x64 SockFilter C API DLL and a driver whose signature is accepted by the target Windows system |
 
 ## Build Commands
@@ -121,7 +127,7 @@ cd frontend; bun install; cd ..
 # production build: generates bindings, builds the frontend with bun,
 # generates icons/syso, and compiles the exe
 wails3 build
-# output: bin/sgfg-ng.exe plus bin/sockfilter/ when SDK assets are available
+# output: bin/sgfg-ng.exe, bin/sgfg-driver-helper.exe (x64), and bin/sockfilter/ when SDK assets are available
 
 # development mode (frontend hot reload + Go recompile)
 wails3 dev
@@ -143,6 +149,7 @@ Place the vendor SDK in `nfsdk/` (or supply the corresponding runtime files your
 ```text
 bin/
   sgfg-ng.exe
+  sgfg-driver-helper.exe         # elevated, headless; keep beside the GUI
   sockfilter/
     nfapi.dll                    # sockfilter/bin/release_c_api/x64/nfapi.dll
     driver/x64/sockfilter.sys     # sockfilter/bin/driver/x64/sockfilter.sys
@@ -151,15 +158,29 @@ bin/
 
 `build/windows/stage-sockfilter.ps1` copies assets only; it never installs a driver. Without SDK files, the ordinary proxy build remains available and process proxying reports the missing dependency when enabled. Do not commit or redistribute vendor binaries/source unless your license permits it. The bundled SDK used for internal evaluation has connection limits and test-signing restrictions; preparing a production UI does not turn an evaluation driver into a production-licensed driver.
 
-Use the **x64 C API** `nfapi.dll`, not the SDK's C++ or Win32 DLL. The application loads it only from `sockfilter/nfapi.dll` beside the executable, not from `PATH` or the working directory; the integration does not require CGO or an external native helper. The separate internal `README.sockfilter.md` is optional and need not be published: this README contains the essential deployment and safety information. The staging script copies that extra document only when present.
+Use the **x64 C API** `nfapi.dll`, not the SDK's C++ or Win32 DLL. Only the elevated helper loads it, from `sockfilter/nfapi.dll` beside the helper executable; dependent DLL lookup is restricted to that directory and Windows System32, not `PATH` or the working directory. Both executables are built in Go without CGO; `sgfg-driver-helper.exe` is now a required separate component for process proxying. The separate internal `README.sockfilter.md` is optional and need not be published: this README contains the essential deployment and safety information. The staging script copies that extra document only when present.
+
+The native Windows task builds the helper automatically using `build/windows/build-driver-helper.ps1`. For a manual build, run `powershell -NoProfile -File build/windows/build-driver-helper.ps1 -OutputDirectory bin`. This generates the helper's own administrator manifest and builds `./cmd/sgfg-driver-helper`; it does not install or run the driver. The GUI manifest uses `asInvoker`, the helper uses `requireAdministrator`. Keep the GUI and helper from the same build. Cross-build/installer pipelines must build and package the helper explicitly rather than assuming a GUI-only build includes it. Obfuscating the GUI does not obfuscate the separately built helper.
 
 ### Using process proxy
 
-1. Launch the application and approve the Windows administrator prompt.
+1. Launch the application normally as your interactive user. Do not use **Run as administrator**, an elevated terminal, or an administrator compatibility shortcut for the GUI.
 2. In Options, enter complete executable filenames (one per line, or comma-separated), save, and enable process proxy. Same-named processes are all selected; differently named child processes must be listed separately.
-3. Connect. The application copies the driver to the protected Windows driver directory and starts **`sgfg_sockfilter`**, a demand-start kernel service owned by SGFG. No manual installation script is needed.
+3. Connect and approve UAC for **`sgfg-driver-helper.exe`**. The helper copies the driver to the protected Windows driver directory and starts **`sgfg_sockfilter`**, a demand-start kernel service owned by SGFG. It owns the SDK callbacks and local transparent TCP/UDP/DNS forwarding; the node-facing proxy core remains in the ordinary-user GUI. No manual installation script is needed. Cancelling UAC rolls back this connection attempt without changing Windows security settings.
 4. Restart target applications or create new connections. Existing sockets are not guaranteed to be reclassified.
 5. Disconnect or exit. Filtering is detached first, then the driver is stopped, the service deleted, and the installed driver file removed. Packaged runtime assets stay beside the executable for the next connection.
+
+### Privilege separation and Windows Administrator Protection
+
+The ordinary-user process exclusively owns Wails/WebView2, `%APPDATA%` preferences and password decryption, HKCU system-proxy changes, the remote GOST/Hysteria client and traffic totals. It refuses an explicitly elevated launch **before** accessing settings, the system proxy or WebView2. This avoids creating a browser profile or writing proxy settings under the temporary `ADMIN_*` account used by Windows Administrator Protection. An ordinary HTTP/SOCKS5 or system-proxy connection does not launch a helper or show UAC. Merely saving/enabling the process-proxy option does not elevate either; connecting does.
+
+Each process-proxy connection launches one helper through `ShellExecuteExW` with the `runas` verb, not a command interpreter. The helper has no GUI/WebView2, no node credentials, no SS credentials, no user-settings access and no HKCU proxy logic. It talks only to the parent's loopback SOCKS5 listener. Both the GUI PID and helper PID bypass filtering to prevent recursion even if their filenames appear in the process list.
+
+Control uses a randomly named, first-instance **local named pipe**, rejecting remote clients, with a DACL for the launching user, administrators and SYSTEM. The GUI checks the connecting helper's kernel-reported PID against the specific process handle returned by UAC launch. The helper checks the pipe server PID against its pinned parent, verifies that the executables are in the same resolved directory and Windows session, and watches the original parent process handle. Different elevated user SIDs are deliberately permitted; a same-user-SID check would break Administrator Protection. The size-bounded, versioned protocol accepts only one validated start request, heartbeat and stop; it does not expose arbitrary commands, paths, DLLs, driver names or general service-management operations.
+
+On disconnect, the GUI waits for a cleanup acknowledgment before closing the node-facing proxy. A dead GUI process, broken pipe or missing heartbeat makes the helper attempt SDK/driver cleanup and exit. If the helper dies unexpectedly, the GUI marks process filtering inactive and disconnects the local proxy rather than continuing to report a filtered connection. Forced helper termination or an OS failure cannot guarantee driver removal; owned-driver recovery on the next connection still applies. This remains **not a kill switch**.
+
+Use a trusted distribution directory and preferably sign both executables; an installed deployment should protect the helper, DLL and driver assets with appropriate ACLs. This is a per-connection, user-consented UAC helper, not a permanently installed privileged service or a substitute for secure package distribution. Existing driver signing/evaluation restrictions still apply.
 
 Only the SGFG-owned service/file is managed. An existing vendor service named `sockfilter`, Proxifier services, and other drivers are not overwritten or removed. A cross-process guard prevents two SGFG instances from managing the same driver simultaneously. Startup failure rolls back newly installed resources; after abnormal termination, the next process-proxy connection attempts recovery of its own stale driver. A blocked unload/deletion is reported rather than claimed successful, and may require closing other tools or restarting Windows. The application never changes Secure Boot, memory integrity, signature enforcement or test-signing settings.
 
@@ -183,11 +204,11 @@ DNS scope is limited to captured queries from selected processes. Windows DNS Cl
 
 ### Driver troubleshooting
 
-1. Check that the complete runtime directory is beside the executable, the DLL is the x64 C API build, and the application was launched with administrator privileges.
+1. Check that `sgfg-driver-helper.exe` and the complete runtime directory are beside the GUI, the DLL is the x64 C API build, and the GUI was launched **without** administrator privileges. Approve the helper's UAC request only when connecting with process proxy enabled. Remove any old “Run this program as administrator” shortcut/compatibility setting yourself; the app does not change Windows security policies.
 2. During an active process-proxy connection, `sc.exe query sgfg_sockfilter` should report `RUNNING`. After a successful disconnect, querying the service should report that it does not exist. Ordinary proxy mode does not create this service.
 3. For a driver-load error, retain the Windows error shown in the application and check **Event Viewer → Applications and Services Logs → Microsoft → Windows → CodeIntegrity → Operational**. Resolve signing or licensing with the vendor rather than disabling system protections.
 4. For unload/deletion errors, close other SGFG instances and service-management tools that may hold handles, then retry. A restart may be needed if Windows cannot unload the driver. Do not use the vendor's generic uninstall script against unrelated installations.
-5. Avoid overlapping Proxifier/other proxy rules: configure the actual SGFG executable and selected applications as Direct in those tools where appropriate. Detecting another proxy process does not itself prove a conflict; SGFG does not change its rules or stop its services.
+5. Avoid overlapping Proxifier/other proxy rules: configure the actual SGFG executable, **`sgfg-driver-helper.exe`** and selected applications as Direct in those tools where appropriate. Detecting another proxy process does not itself prove a conflict; SGFG does not change its rules or stop its services.
 6. If traffic still fails, record the application error, Windows version, selected transport and executable names, and whether TCP, UDP or IPv6 is affected. Detailed process-flow logs and counters can be enabled before launch with `SGFG_SOCKFILTER_DEBUG=1`; leave this unset for normal use. Logs may contain process names and destination addresses, so review them before sharing.
 
 Ordinary automated tests do not install or load the driver. The v11.3 lifecycle rollback/order checks use fake backends; these do not replace an elevated connect/disconnect test on the target Windows system. Real driver and external-node probes are explicitly opt-in.
@@ -360,7 +381,7 @@ Open (also in your cloud provider's security group):
 
 1. Edit `internal/core/nodes.go` with your own servers (see [Node Configuration](#node-configuration)); passwords and obfs secrets must match the server configs above.
 2. Run `wails3 build`.
-3. For ordinary proxy use, distribute `bin/sgfg-ng.exe`. For process proxying, also distribute the licensed `sockfilter/` runtime directory beside it. Custom installers and cross-build pipelines must preserve this directory layout; packaging a driver is not the same as installing it.
+3. For ordinary proxy use, distribute `bin/sgfg-ng.exe`. For process proxying, also distribute `bin/sgfg-driver-helper.exe` and the licensed `sockfilter/` runtime directory beside it. Custom installers and cross-build pipelines must preserve this directory layout; packaging a driver is not the same as installing it.
 4. On first run, pick a transport, connect, and optionally open the options window (gear icon) for SOCKS5 mode, LAN access, custom port, or the SS relay.
 
 ## Project Structure
@@ -395,7 +416,7 @@ sgfg-ng/
 - WebTransport application forwarding is TCP-only. Hysteria2/Turtleor retain UDP support. Captured DNS 53 queries use TCP regardless of the selected transport.
 - Conflicting third-party proxy rules may cause repeated proxying; exclude SGFG and the selected applications from those rules where appropriate.
 - Driver installation/unload regression tests use fake lifecycle backends by default. Real driver/network tests are opt-in, require elevation and must not run concurrently with the application using the driver.
-- The Hysteria2 local SOCKS5 UDP ASSOCIATE implementation is simplified: fragmented (FRAG != 0) packets are dropped per RFC intent; the UDP relay socket binds to the local address of its TCP control connection (works for LAN clients when LAN access is enabled).
+- The Hysteria2/Turtleor local SOCKS5 UDP relay pins the client's IP and **nonzero UDP source port from the TCP ASSOCIATE request**, before receiving any datagrams. The IP must match the TCP peer (an unspecified IP uses that peer); all other source endpoints, invalid reserved bytes and fragments are dropped. To prevent local first-packet hijacking, zero-port and domain-name source requests are rejected with SOCKS5 REP=2 rather than learned from incoming UDP. The built-in process-proxy helper already declares its real UDP endpoint and is unaffected; external UDP clients must do the same. The relay socket binds to the TCP connection's local address and works for LAN clients when LAN access is enabled. This endpoint binding does not turn the unauthenticated local proxy into a per-user authentication boundary.
 - Local connections are capped at 512 concurrent sessions; HTTP CONNECT headers are capped at 64 KB.
 - Node information is hardcoded by design; changing nodes requires editing `internal/core/nodes.go` and rebuilding.
 
@@ -405,10 +426,14 @@ This project was built in collaboration with AI pair-programming and review mode
 
 - **Kimi K3** — co-developer: full Go rewrite, backend architecture, UI implementation, debugging, and documentation
 - **GPT 6 Astra** — co-developer: SockFilter process-proxy integration, DNS-over-TCP forwarding, driver lifecycle management, settings-save fixes, regression tests, and v11.3 release documentation
+- **GPT 6.1 Sol** — co-developer: v11.4 privilege separation, elevated driver helper, authenticated local IPC, lifecycle regression tests, Windows Administrator Protection compatibility work, and release documentation
 - **GPT 5.6 Luna** — code review
 - **Grok 4.5** — code review
 - **Grok 4.6** — code review
 - **Muse Spark 1.3** — code review
+- **Muse Spark Open** — code review
+- **Gemini 4 Argon** — code review, security review, github project management
+- **Kimi K3.1 Pro** — code review
 
 ## License
 

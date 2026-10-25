@@ -58,6 +58,7 @@ type Session struct {
 	closeErr       error
 	debug          bool
 	tcpFailures    atomic.Uint64
+	bypassPID      uint32
 }
 
 func equalProcessName(a, b string) bool { return strings.EqualFold(a, b) }
@@ -106,6 +107,7 @@ func Start(port int, names []string, log func(string, string), options ...Option
 		conns: make(map[net.Conn]bool), udp: make(map[uintptr]*udpFlow)}
 	if len(options) > 0 {
 		s.tcpOnly = options[0].TCPOnly
+		s.bypassPID = options[0].BypassPID
 	}
 	for _, family := range []uint16{2, 23} {
 		network, addr := "tcp4", "0.0.0.0:0"
@@ -148,7 +150,7 @@ func Start(port int, names []string, log func(string, string), options ...Option
 		s.wg.Add(1)
 		go s.accept(family, ln)
 	}
-	rules := makeRules(names, uint32(os.Getpid()))
+	rules := makeRules(names, uint32(os.Getpid()), s.bypassPID)
 	r = a.call("nf_setRulesEx", uintptr(unsafe.Pointer(&rules[0])), uintptr(len(rules)))
 	runtime.KeepAlive(rules)
 	if int32(r) != 0 {
@@ -186,7 +188,7 @@ func (s *Session) tcpConnect(id uintptr, info *[67]byte) {
 	// 0xffffffff for ordinary clients, so a BOOL-style != 0 check bypassed
 	// every matched connection. The SDK sample relies on its built-in redirect
 	// protection plus excluding ourselves/loopback, which we retain below.
-	if pid == uint32(os.Getpid()) {
+	if pid == uint32(os.Getpid()) || (s.bypassPID != 0 && pid == s.bypassPID) {
 		binary.LittleEndian.PutUint32(info[:4], 0)
 		return
 	}

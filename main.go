@@ -17,9 +17,12 @@ import (
 var assets embed.FS
 
 func main() {
+	if !normalUserStartup() {
+		return
+	}
 	restoreStaleSysProxy()
 
-	mgr := proxy.NewManager()
+	mgr := proxy.NewPersistentManager()
 	svc := NewProxyService(mgr)
 
 	app := application.New(application.Options{
@@ -42,12 +45,12 @@ func main() {
 	svc.attachApp(app)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:        "神龟翻滚 SGFG-VUE " + Version,
-		Width:        920,
-		Height:       580,
-		MinWidth:     860,
-		MinHeight:    540,
-		Frameless:    true,
+		Title:            "神龟翻滚 SGFG-VUE " + Version,
+		Width:            920,
+		Height:           580,
+		MinWidth:         860,
+		MinHeight:        540,
+		Frameless:        true,
 		BackgroundColour: application.NewRGB(0xe8, 0xfa, 0xec),
 	})
 

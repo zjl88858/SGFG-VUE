@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"sgfg-ng/internal/core"
+	"sgfg-ng/internal/filterhelper"
 	"sgfg-ng/internal/ping"
 	"sgfg-ng/internal/sockfilter"
 	"sgfg-ng/internal/sysproxy"
@@ -72,7 +73,7 @@ type Manager struct {
 	relayOn      bool
 	relayPort    int
 	sysProxy     bool
-	filter       *sockfilter.Session
+	filter       *filterhelper.Client
 	traffic      *core.Traffic
 	relayOpts    RelayOptions
 	settingsPath string
@@ -334,7 +335,7 @@ func (m *Manager) Connect() error {
 	m.log("info", fmt.Sprintf("本地代理已启动: %s://%s:%d -> %s:%d", method, listenAddr, localPort, sel.Node.Host, sel.Port))
 
 	if opts.ProcessProxy {
-		filter, err := sockfilter.Start(localPort, opts.ProcessNames, m.log, sockfilter.Options{TCPOnly: sel.Transport == core.TransportWebTransport})
+		filter, err := filterhelper.Start(localPort, opts.ProcessNames, m.log, sockfilter.Options{TCPOnly: sel.Transport == core.TransportWebTransport})
 		if err != nil {
 			m.closeProxyLocked()
 			m.localPort = 0
@@ -342,6 +343,7 @@ func (m *Manager) Connect() error {
 			return fmt.Errorf("启动进程代理失败: %w", err)
 		}
 		m.filter = filter
+		go m.watchFilter(filter)
 	}
 
 	if opts.SysProxy {
@@ -384,6 +386,27 @@ func isPortBusy(err error) bool {
 func (m *Manager) Disconnect() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.disconnectLocked()
+}
+
+// Never leave the UI saying process filtering is active after the elevated
+// process/pipe has failed. Closing the upstream is not a system-wide kill switch.
+func (m *Manager) watchFilter(filter *filterhelper.Client) {
+	<-filter.Done()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.filter != filter || m.state != StateConnected {
+		return
+	}
+	reason := "进程代理 helper 意外停止，正在断开连接"
+	if err := filter.Err(); err != nil {
+		reason += ": " + err.Error()
+	}
+	m.log("error", reason)
+	_ = m.disconnectLocked()
+}
+
+func (m *Manager) disconnectLocked() error {
 	if m.state != StateConnected {
 		return errors.New("not connected")
 	}

@@ -17,7 +17,12 @@ var dnsUpstream = netip.MustParseAddrPort("1.1.1.1:53")
 
 // Options describes capabilities of the selected upstream, not the protocol
 // used by the local SOCKS5 listener. DNS always uses SOCKS5 CONNECT (TCP).
-type Options struct{ TCPOnly bool }
+type Options struct {
+	TCPOnly bool
+	// The helper's authenticated GUI parent owns the upstream proxy. Both
+	// processes must bypass the filter, including when their names are selected.
+	BypassPID uint32
+}
 
 func tcpDestination(original netip.AddrPort) netip.AddrPort {
 	if original.Port() == 53 {
