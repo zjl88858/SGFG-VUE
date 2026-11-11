@@ -3,8 +3,8 @@ import { Window } from '@wailsio/runtime'
 
 defineProps<{
   title: string
+  subtitle?: string
   version?: string
-  avatar?: string
   showMin?: boolean
   showMax?: boolean
 }>()
@@ -15,19 +15,21 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 <template>
   <div class="titlebar drag-region" @dblclick="showMax ? Window.ToggleMaximise() : undefined">
     <div class="tb-left">
-      <img v-if="avatar" :src="avatar" class="tb-avatar" alt="" />
-      <span class="tb-title">{{ title }}</span>
-      <span v-if="version" class="tb-ver">{{ version }}</span>
+      <div class="tb-brand">
+        <span class="tb-title">{{ title }}</span>
+        <span v-if="version" class="tb-ver" :aria-label="`版本 ${version}`">{{ version }}</span>
+      </div>
+      <span v-if="subtitle" class="tb-subtitle">{{ subtitle }}</span>
     </div>
-    <div class="tb-actions no-drag">
-      <button v-if="showMin" class="tb-btn min" title="最小化" @click="Window.Minimise()">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/></svg>
+    <div class="tb-actions no-drag" @dblclick.stop>
+      <button v-if="showMin" class="tb-btn min" title="最小化" aria-label="最小化" @click="Window.Minimise()">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg>
       </button>
-      <button v-if="showMax" class="tb-btn max" title="最大化" @click="Window.ToggleMaximise()">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
+      <button v-if="showMax" class="tb-btn max" title="最大化" aria-label="最大化或还原" @click="Window.ToggleMaximise()">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
       </button>
-      <button class="tb-btn close" title="关闭" @click="emit('close')">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      <button class="tb-btn close" title="关闭" aria-label="关闭" @click="emit('close')">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
   </div>
@@ -35,18 +37,30 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 <style scoped>
 .titlebar {
+  position: relative;
   flex: none;
-  height: 46px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px 0 14px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(209, 250, 229, 0.78));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 2px 12px rgba(16, 185, 129, 0.1);
-  backdrop-filter: blur(10px);
+  padding: 0 10px 0 20px;
+  background: linear-gradient(105deg, #def1e5e6, #f8fcf9ed 42%, #f9eef4d9);
+  border-bottom: 1px solid #ffffffb3;
+  box-shadow: inset 0 1px 0 #ffffffed, 0 1px 0 #50745e0a;
+  backdrop-filter: blur(16px);
   user-select: none;
   animation: tb-drop 0.45s cubic-bezier(0.22, 0.9, 0.36, 1) both;
+}
+
+.titlebar::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, #8abf9e60, #b9d6c226 42%, #d7abc34d);
+  pointer-events: none;
 }
 
 @keyframes tb-drop {
@@ -63,23 +77,33 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 .tb-left {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 14px;
   min-width: 0;
 }
 
-.tb-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 9px;
-  object-fit: cover;
-  box-shadow: 0 3px 8px rgba(16, 185, 129, 0.3);
+.tb-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  flex: none;
 }
 
 .tb-title {
-  font-size: 13.5px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: var(--green-800);
+  flex: none;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  color: #3e7155;
+  line-height: 24px;
+  text-shadow: 0 1px 0 #ffffffa6;
+}
+
+.tb-subtitle {
+  font-size: 11px;
+  font-weight: 450;
+  letter-spacing: 0.01em;
+  color: #7c8a81;
+  line-height: 20px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -87,61 +111,62 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 .tb-ver {
   flex: none;
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 2px 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  line-height: 1;
   border-radius: 999px;
-  color: var(--green-700);
-  background: linear-gradient(135deg, var(--green-200), var(--green-100));
-  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2);
+  color: #a26183;
+  background: linear-gradient(160deg, #fff6fb, #f2dce8);
+  border: 1px solid #d8acc352;
+  box-shadow: inset 0 1px 0 #ffffffed, 0 2px 5px #ac729210;
 }
 
 .tb-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: none;
+  margin-left: 16px;
 }
 
 .tb-btn {
-  width: 30px;
-  height: 30px;
-  border: none;
-  border-radius: 10px;
+  width: 28px;
+  height: 26px;
+  border: 1px solid #ffffff80;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   cursor: pointer;
-  color: var(--green-700);
-  background: transparent;
-  transition: all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  color: #688473;
+  background: #ffffff45;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
 }
 
-.tb-btn.min:hover {
-  background: var(--green-100);
-  color: var(--green-600);
-  box-shadow: 0 3px 8px rgba(16, 185, 129, 0.2);
-}
-
+.tb-btn.min:hover,
 .tb-btn.max:hover {
-  background: #dbeafe;
-  color: #2563eb;
-  box-shadow: 0 3px 8px rgba(59, 130, 246, 0.2);
+  background: #dcefe3;
+  color: #3e7859;
+}
+
+.tb-btn.close {
+  color: #a57b91;
+  background: #f8e7ef80;
 }
 
 .tb-btn.close:hover {
-  background: linear-gradient(135deg, var(--red-400), var(--red-500));
-  color: #fff;
-  box-shadow: 0 3px 10px rgba(239, 68, 68, 0.4);
-}
-
-.tb-btn.close:hover svg {
-  transform: rotate(90deg);
-}
-
-.tb-btn.close svg {
-  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  background: #f1d6e3;
+  color: #a45579;
 }
 
 .tb-btn:active {
-  transform: scale(0.85);
+  transform: scale(0.94);
 }
 </style>

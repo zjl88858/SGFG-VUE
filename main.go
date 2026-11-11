@@ -46,9 +46,9 @@ func main() {
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "神龟翻滚 SGFG-VUE " + Version,
-		Width:            920,
+		Width:            860,
 		Height:           580,
-		MinWidth:         860,
+		MinWidth:         760,
 		MinHeight:        540,
 		Frameless:        true,
 		BackgroundColour: application.NewRGB(0xe8, 0xfa, 0xec),

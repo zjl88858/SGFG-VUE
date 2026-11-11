@@ -10,16 +10,24 @@ import (
 	"testing"
 	"time"
 
-	relay_protocol "github.com/go-gost/relay"
 	"github.com/go-gost/x/registry"
+	omclient "github.com/zjl88858/oh-my-hysteria/core/v2/client"
 	xproxy "golang.org/x/net/proxy"
 )
 
-// Local-only integration: real SOCKS and HTTP handlers, real relay negotiation,
-// and a fake upstream. No driver, credentials or Internet access required.
+type trafficTestClient struct{ addr string }
+
+func (c *trafficTestClient) TCP(string) (net.Conn, error) {
+	return net.DialTimeout("tcp", c.addr, 3*time.Second)
+}
+func (*trafficTestClient) UDP() (omclient.HyUDPConn, error) { return nil, io.ErrClosedPipe }
+func (*trafficTestClient) Close() error                     { return nil }
+
+// Local-only integration: real SOCKS and HTTP handlers and a fake OMHY client.
+// No driver, credentials or Internet access required.
 // The unmetered local forwarding stage exercises the same accounting boundary
 // used by the SS relay, without a process-global SS salt replay-cache collision.
-func TestGostTrafficAndLocalRelayCountOnce(t *testing.T) {
+func TestOMHYTrafficAndLocalRelayCountOnce(t *testing.T) {
 	upstream, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -36,13 +44,6 @@ func TestGostTrafficAndLocalRelayCountOnce(t *testing.T) {
 			go func() {
 				defer c.Close()
 				c.SetDeadline(time.Now().Add(3 * time.Second))
-				var req relay_protocol.Request
-				if _, err := req.ReadFrom(c); err != nil {
-					return
-				}
-				if _, err := (&relay_protocol.Response{Version: relay_protocol.Version1, Status: relay_protocol.StatusOK}).WriteTo(c); err != nil {
-					return
-				}
 				p := make([]byte, len(request))
 				if _, err := io.ReadFull(c, p); err == nil && bytes.Equal(p, request) {
 					c.Write(response)
@@ -51,13 +52,22 @@ func TestGostTrafficAndLocalRelayCountOnce(t *testing.T) {
 		}
 	}()
 	traffic := &Traffic{}
-	primary, err := StartGost("socks5://127.0.0.1:0", "relay+tcp://"+upstream.Addr().String(), traffic)
+	primary, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer primary.Close()
-	registered := append([]string{}, primary.connectors...)
-	addr := primary.svcs[0].Addr().String()
+	client := &trafficHyClient{Client: &trafficTestClient{addr: upstream.Addr().String()}, traffic: traffic}
+	go func() {
+		for {
+			c, err := primary.Accept()
+			if err != nil {
+				return
+			}
+			go handleSocks5(c, client)
+		}
+	}()
+	addr := primary.Addr().String()
 	dialer, err := xproxy.SOCKS5("tcp", addr, nil, &net.Dialer{Timeout: 3 * time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +100,7 @@ func TestGostTrafficAndLocalRelayCountOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer localRelay.Close()
+	registered := append([]string{}, localRelay.chains...)
 	raw, err := net.DialTimeout("tcp", localRelay.svcs[0].Addr().String(), 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -110,10 +121,10 @@ func TestGostTrafficAndLocalRelayCountOnce(t *testing.T) {
 	if got := traffic.Snapshot(); got != (TrafficSnapshot{Upload: uint64(2 * len(request)), Download: uint64(2 * len(response))}) {
 		t.Fatalf("local relay must be counted exactly once: %+v", got)
 	}
-	primary.Close()
+	localRelay.Close()
 	for _, name := range registered {
-		if registry.ConnectorRegistry().Get(name) != nil {
-			t.Fatal("metered connector registration leaked")
+		if registry.ChainRegistry().IsRegistered(name) {
+			t.Fatal("local relay chain registration leaked")
 		}
 	}
 }

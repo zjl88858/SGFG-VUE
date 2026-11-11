@@ -1,16 +1,17 @@
 const COLORS = ['#34d399', '#6ee7b7', '#a7f3d0', '#f9a8d4', '#f472b6', '#fcd34d', '#93c5fd']
 
 export function candyBurst(x: number, y: number) {
-  const count = 7 + Math.floor(Math.random() * 4)
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const count = 5 + Math.floor(Math.random() * 3)
   for (let i = 0; i < count; i++) {
     const dot = document.createElement('div')
-    const size = 5 + Math.random() * 6
+    const size = 3 + Math.random() * 4
     const color = COLORS[Math.floor(Math.random() * COLORS.length)]
     dot.style.cssText = `position:fixed;left:${x}px;top:${y}px;width:${size}px;height:${size}px;border-radius:50%;background:${color};pointer-events:none;z-index:1000;box-shadow:0 0 6px ${color};`
     document.body.appendChild(dot)
 
     const angle = Math.random() * Math.PI * 2
-    const dist = 34 + Math.random() * 52
+    const dist = 20 + Math.random() * 30
     const dx = Math.cos(angle) * dist
     const dy = Math.sin(angle) * dist - 12
 

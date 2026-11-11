@@ -29,10 +29,11 @@ function onInput(ev: Event) {
   width: 100%;
   padding: 9px 14px;
   border-radius: 12px;
-  border: 2px solid var(--green-200);
+  min-width: 0;
+  border: 1px solid #cce5d5;
   background: rgba(255, 255, 255, 0.9);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--ink);
   outline: none;
@@ -51,7 +52,6 @@ function onInput(ev: Event) {
 .candy-input:focus {
   border-color: var(--green-400);
   box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.18);
-  transform: scale(1.01);
 }
 
 .candy-input:disabled {

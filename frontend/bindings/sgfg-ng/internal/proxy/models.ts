@@ -79,6 +79,31 @@ export class PingResult {
     }
 }
 
+export class RelayOptions {
+    "port": number;
+    "password": string;
+
+    /** Creates a new RelayOptions instance. */
+    constructor($$source: Partial<RelayOptions> = {}) {
+        if (!("port" in $$source)) {
+            this["port"] = 0;
+        }
+        if (!("password" in $$source)) {
+            this["password"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RelayOptions instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RelayOptions {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RelayOptions($$parsedSource as Partial<RelayOptions>);
+    }
+}
+
 export class SelectResult {
     "nodeLabel": string;
     "nodeName": string;

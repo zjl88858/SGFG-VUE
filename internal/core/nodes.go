@@ -10,31 +10,59 @@ import (
 type Transport string
 
 const (
-	TransportWebTransport Transport = "webtransport"
-	TransportHysteria2 Transport = "hysteria2"
-	TransportTurtleor  Transport = "turtleor"
+	TransportOMHYDirect   Transport = "omhy-direct"
+	TransportOMHYTurtleor Transport = "omhy-turtleor"
 )
 
 type Node struct {
-	Name     string
-	Host     string
-	Password string
+	Name          string
+	Host          string
+	Password      string
+	DirectBlink   BlinkConfig
+	TurtleorBlink BlinkConfig
 }
 
+// Deployment-specific information lives only in this file. config_demo is a
+// private reference directory, not a build/runtime dependency; it may be removed
+// before publication. Review these values before publishing source or binaries.
 var Nodes = []Node{
-	{Name: "***", Host: "***", Password: "***"},
-	{Name: "***", Host: "***", Password: "***"},
-	{Name: "***", Host: "***", Password: "***"},
+	{
+		Name:          "argon",
+		Host:          "",
+		Password:      "",
+		DirectBlink:   nodeBlink(""),
+		TurtleorBlink: nodeBlink(""),
+	},
+	{
+		Name:          "barium",
+		Host:          "",
+		Password:      "",
+		DirectBlink:   nodeBlink(""),
+		TurtleorBlink: nodeBlink(""),
+	},
+}
+
+// Shared Blink parameters from the supplied reference profiles. Per-mode
+// authentication secrets and these defaults can all be edited in nodes.go.
+func nodeBlink(password string) BlinkConfig {
+	padding, junk := 16, 3
+	return BlinkConfig{
+		Password: password, MaxPacketSize: 1150, Fragmentation: true,
+		PaddingMax: &padding, JunkPackets: &junk, MaxSessions: 3072,
+		// Zero selects upstream defaults for the remaining resource budgets.
+		MaxReassemblyBytes: 0, VerifyPacketsPerSecond: 0,
+	}
 }
 
 const (
-	GostServerPort = 1443
 	LocalProxyPort = 7788
 
 	LocalProxyPortMaxTry = 10
 
-	ObfsHysteria2 = "***"
-	ObfsTurtleor  = "***"
+	DirectPortMin   = 10520
+	DirectPortMax   = 10522
+	TurtleorPortMin = 11520
+	TurtleorPortMax = 11522
 )
 
 type Selection struct {
@@ -58,6 +86,9 @@ func SelectNode(t Transport) (Selection, error) {
 }
 
 func SelectNodeExcluding(t Transport, exclude map[string]bool) (Selection, error) {
+	if !t.Valid() {
+		return Selection{}, fmt.Errorf("unknown transport: %s", t)
+	}
 	var candidates []Node
 	for _, n := range Nodes {
 		if !exclude[n.Name] {
@@ -78,15 +109,12 @@ func BuildSelection(t Transport, node Node) (Selection, error) {
 	var err error
 	sel := Selection{Transport: t, Node: node}
 	switch t {
-	case TransportWebTransport:
-		sel.Label = fmt.Sprintf("%s(wt)->direct", node.Name)
-		sel.Port = GostServerPort
-	case TransportHysteria2:
-		sel.Label = fmt.Sprintf("%s(hy2)->direct", node.Name)
-		sel.Port, err = randPort(30000, 50000)
-	case TransportTurtleor:
-		sel.Label = fmt.Sprintf("%s(hy2)->warpplus(M-H3)", node.Name)
-		sel.Port, err = randPort(10000, 20000)
+	case TransportOMHYDirect:
+		sel.Label = fmt.Sprintf("%s(omhy)->direct", node.Name)
+		sel.Port, err = randPort(DirectPortMin, DirectPortMax)
+	case TransportOMHYTurtleor:
+		sel.Label = fmt.Sprintf("%s(omhy)->turtleor", node.Name)
+		sel.Port, err = randPort(TurtleorPortMin, TurtleorPortMax)
 	default:
 		return Selection{}, fmt.Errorf("unknown transport: %s", t)
 	}
@@ -96,11 +124,22 @@ func BuildSelection(t Transport, node Node) (Selection, error) {
 	return sel, nil
 }
 
-func (t Transport) ObfsPassword() string {
-	if t == TransportTurtleor {
-		return ObfsTurtleor
+func (t Transport) Valid() bool {
+	return t == TransportOMHYDirect || t == TransportOMHYTurtleor
+}
+
+func (t Transport) portRange() (int, int) {
+	if t == TransportOMHYTurtleor {
+		return TurtleorPortMin, TurtleorPortMax
 	}
-	return ObfsHysteria2
+	return DirectPortMin, DirectPortMax
+}
+
+func (s Selection) BlinkConfig() BlinkConfig {
+	if s.Transport == TransportOMHYTurtleor {
+		return s.Node.TurtleorBlink
+	}
+	return s.Node.DirectBlink
 }
 
 func randPort(min, max int) (int, error) {

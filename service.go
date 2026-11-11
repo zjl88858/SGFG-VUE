@@ -17,7 +17,7 @@ type ProxyService struct {
 	optWin *application.WebviewWindow
 }
 
-const Version = "v11.4"
+const Version = "v12.1"
 
 func NewProxyService(mgr *proxy.Manager) *ProxyService {
 	return &ProxyService{mgr: mgr}
@@ -113,10 +113,10 @@ func (s *ProxyService) OpenOptions() {
 	win := s.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "options",
 		Title:            "选项 - SGFG-VUE",
-		Width:            470,
-		Height:           545,
+		Width:            480,
+		Height:           540,
 		MinWidth:         430,
-		MinHeight:        540,
+		MinHeight:        500,
 		URL:              "/#/options",
 		Frameless:        true,
 		BackgroundColour: application.NewRGB(0xe8, 0xfa, 0xec),

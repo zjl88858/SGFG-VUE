@@ -1,12 +1,10 @@
 package core
 
 import (
-	"context"
 	"net"
 	"sync"
 
-	hyclient "github.com/apernet/hysteria/core/v2/client"
-	"github.com/go-gost/core/connector"
+	hyclient "github.com/zjl88858/oh-my-hysteria/core/v2/client"
 )
 
 // Traffic counts application bytes at the remote proxy connection boundary.
@@ -71,21 +69,6 @@ func (c *trafficConn) Write(p []byte) (int, error) {
 	n, err := c.Conn.Write(p)
 	c.traffic.add(true, n)
 	return n, err
-}
-
-// Wrap after relay negotiation so proxy authentication and QUIC overhead are
-// excluded. No ReaderFrom/WriterTo shortcuts can skip the counting methods.
-type trafficConnector struct {
-	connector.Connector
-	traffic *Traffic
-}
-
-func (c *trafficConnector) Connect(ctx context.Context, conn net.Conn, network, address string, opts ...connector.ConnectOption) (net.Conn, error) {
-	remote, err := c.Connector.Connect(ctx, conn, network, address, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return &trafficConn{Conn: remote, traffic: c.traffic}, nil
 }
 
 type trafficHyClient struct {

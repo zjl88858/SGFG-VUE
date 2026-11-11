@@ -21,7 +21,7 @@ func TestGostErrorForwarding(t *testing.T) {
 	defer SetGostLogSink(nil)
 	l := (&gostEventLogger{Logger: &quietGostLogger{}}).WithFields(map[string]any{"kind": "dialer", "password": "secret"})
 	l.Errorf("route: %s", "timeout: no recent network activity")
-	l.Warn("cannot dial relay+wt://user:secret@host:1443")
+	l.Warn("cannot dial ss://user:secret@host:8388")
 	l.Error("use of closed network connection")
 	if len(got) != 2 || !strings.Contains(got[0], "GOST [dialer]: route: timeout: no recent network activity") {
 		t.Fatal(got)

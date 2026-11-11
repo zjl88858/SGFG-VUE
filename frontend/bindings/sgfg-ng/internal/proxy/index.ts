@@ -4,6 +4,7 @@
 export {
     ConnectOptions,
     PingResult,
+    RelayOptions,
     SelectResult,
     StatusInfo
 } from "./models.js";

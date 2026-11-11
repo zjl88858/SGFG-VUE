@@ -3,7 +3,7 @@ import { toasts } from '../toast'
 </script>
 
 <template>
-  <div class="toast-host">
+  <div class="toast-host" role="status" aria-live="polite">
     <TransitionGroup name="toast">
       <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">
         <span class="toast-icon">
@@ -21,7 +21,7 @@ import { toasts } from '../toast'
 <style scoped>
 .toast-host {
   position: fixed;
-  top: 16px;
+  top: 50px;
   right: 16px;
   z-index: 999;
   display: flex;
@@ -34,30 +34,37 @@ import { toasts } from '../toast'
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 200px;
-  max-width: 340px;
-  padding: 10px 16px;
+  min-width: 160px;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 10px 14px;
   border-radius: 14px;
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #fff;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink);
+  background: #ffffffed;
+  border: 1px solid #293c300d;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 4px 20px #293c3010;
 }
 
-.toast.ok {
-  background: linear-gradient(135deg, var(--green-400), var(--green-600));
+.toast.ok .toast-icon {
+  color: #57a27b;
+  background: #e7f4eb;
 }
 
-.toast.error {
-  background: linear-gradient(135deg, var(--red-400), var(--red-500));
+.toast.error .toast-icon {
+  color: #b4647d;
+  background: #fae8ef;
 }
 
-.toast.warn {
-  background: linear-gradient(135deg, var(--yellow-300), #f59e0b);
+.toast.warn .toast-icon {
+  color: #b38b41;
+  background: #faf1dc;
 }
 
-.toast.info {
-  background: linear-gradient(135deg, #93c5fd, #3b82f6);
+.toast.info .toast-icon {
+  color: #648baf;
+  background: #eaf1f8;
 }
 
 .toast-icon {

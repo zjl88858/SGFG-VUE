@@ -67,7 +67,7 @@ type Manager struct {
 	state        State
 	sel          *core.Selection
 	opts         ConnectOptions
-	proxy        any // *core.GostInstance or *core.Hy2Instance
+	proxy        *core.OMHYInstance
 	localPort    int
 	relay        *core.GostInstance
 	relayOn      bool
@@ -167,6 +167,9 @@ func (m *Manager) SelectTransport(transport string) SelectResult {
 	m.mu.Unlock()
 
 	t := core.Transport(transport)
+	if !t.Valid() {
+		return SelectResult{Err: "请选择 omhy-direct 或 omhy-turtleor"}
+	}
 	tried := map[string]bool{prev: true}
 	var sel core.Selection
 	rtt := 0
@@ -175,6 +178,9 @@ func (m *Manager) SelectTransport(transport string) SelectResult {
 	for {
 		cand, err := core.SelectNodeExcluding(t, tried)
 		if err != nil {
+			if sel.Node.Name == "" && prev == "" {
+				return SelectResult{Err: err.Error()}
+			}
 			break
 		}
 		sel = cand
@@ -309,12 +315,12 @@ func (m *Manager) Connect() error {
 	if end > 65536 {
 		end = 65536
 	}
-	var proxyInst any
+	var proxyInst *core.OMHYInstance
 	localPort := 0
 	var startErr error
 	traffic := &core.Traffic{}
 	for p := base; p < end; p++ {
-		proxyInst, startErr = startProxy(sel, method, listenAddr, p, traffic)
+		proxyInst, startErr = core.StartOMHY(*sel, method, listenAddr, p, traffic, m.log)
 		if startErr == nil {
 			localPort = p
 			break
@@ -335,7 +341,7 @@ func (m *Manager) Connect() error {
 	m.log("info", fmt.Sprintf("本地代理已启动: %s://%s:%d -> %s:%d", method, listenAddr, localPort, sel.Node.Host, sel.Port))
 
 	if opts.ProcessProxy {
-		filter, err := filterhelper.Start(localPort, opts.ProcessNames, m.log, sockfilter.Options{TCPOnly: sel.Transport == core.TransportWebTransport})
+		filter, err := filterhelper.Start(localPort, opts.ProcessNames, m.log, sockfilter.Options{})
 		if err != nil {
 			m.closeProxyLocked()
 			m.localPort = 0
@@ -359,19 +365,6 @@ func (m *Manager) Connect() error {
 	m.traffic = traffic
 	m.emitState()
 	return nil
-}
-
-func startProxy(sel *core.Selection, method, listenAddr string, listenPort int, traffic *core.Traffic) (any, error) {
-	switch sel.Transport {
-	case core.TransportWebTransport:
-		listenURL := fmt.Sprintf("%s://%s:%d", method, listenAddr, listenPort)
-		// The custom relay+wt server supports TCP only. Do not advertise a
-		// working UDP ASSOCIATE path; SockFilter DNS uses CONNECT instead.
-		forwardURL := fmt.Sprintf("relay+wt://dwg:%s@%s:%d?secure=true", sel.Node.Password, sel.Node.Host, core.GostServerPort)
-		return core.StartGost(listenURL, forwardURL, traffic)
-	default:
-		return core.StartHy2(sel.Node.Host, sel.Port, sel.Node.Password, sel.Transport.ObfsPassword(), method, listenAddr, listenPort, traffic)
-	}
 }
 
 func isPortBusy(err error) bool {
@@ -438,13 +431,9 @@ func (m *Manager) disconnectLocked() error {
 		relayInst.Close()
 		m.log("info", "SS 中继已关闭")
 	}
-	switch p := proxyInst.(type) {
-	case *core.GostInstance:
-		p.Close()
-		m.log("info", "GOST 已停止")
-	case *core.Hy2Instance:
-		p.Close()
-		m.log("info", "Hysteria2 已停止")
+	if proxyInst != nil {
+		proxyInst.Close()
+		m.log("info", "OMHY 已停止")
 	}
 
 	if hadSysProxy {
@@ -461,13 +450,9 @@ func (m *Manager) disconnectLocked() error {
 }
 
 func (m *Manager) closeProxyLocked() {
-	switch p := m.proxy.(type) {
-	case *core.GostInstance:
-		p.Close()
-		m.log("info", "GOST 已停止")
-	case *core.Hy2Instance:
-		p.Close()
-		m.log("info", "Hysteria2 已停止")
+	if m.proxy != nil {
+		m.proxy.Close()
+		m.log("info", "OMHY 已停止")
 	}
 	m.proxy = nil
 }
@@ -605,11 +590,8 @@ func (m *Manager) Shutdown() {
 	if relayInst != nil {
 		relayInst.Close()
 	}
-	switch p := proxyInst.(type) {
-	case *core.GostInstance:
-		p.Close()
-	case *core.Hy2Instance:
-		p.Close()
+	if proxyInst != nil {
+		proxyInst.Close()
 	}
 	if hadSysProxy {
 		sysproxy.Off()

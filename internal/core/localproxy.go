@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	hyclient "github.com/apernet/hysteria/core/v2/client"
+	hyclient "github.com/zjl88858/oh-my-hysteria/core/v2/client"
 )
 
 func handleSocks5(conn net.Conn, hy hyclient.Client) {

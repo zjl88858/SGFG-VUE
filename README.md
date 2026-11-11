@@ -1,38 +1,45 @@
 # SGFG-VUE
 
-A proxy client for Windows, written in Go. [GoST v3](https://github.com/go-gost/gost) and [Hysteria2](https://github.com/apernet/hysteria) are compiled into the ordinary-user GUI process as Go libraries — no external proxy core processes. Optional process proxying uses a separate elevated driver helper, NetFilter SDK runtime and kernel driver. The UI is built with Wails v3 + Vue 3 + TypeScript in a light-green candy theme.
+A proxy client for Windows, written in Go. [oh-my-hysteria](https://github.com/zjl88858/oh-my-hysteria) is compiled into the desktop user's GUI process as a Go library, using COPA congestion control and complete Blink obfuscation. GOST remains only for the optional local Shadowsocks LAN entrance, not remote-node transport. Optional process proxying uses a separate elevated driver helper, NetFilter SDK runtime and kernel driver. The UI is built with Wails v3 + Vue 3 + TypeScript in a pale-green and pink candy theme.
 
-**Current version: v11.4**
+**Current version: v12.1**
 
-### What's new in v11.4
+### What's new in v12.1
 
-- Split process filtering into the independently elevated `sgfg-driver-helper.exe`; the GUI, WebView2, node-facing proxy, local preferences and HKCU system-proxy settings remain in the ordinary user's process.
-- Request UAC only when connecting with process proxy enabled, avoiding the temporary administrator profile used by Windows Administrator Protection. Normal HTTP/SOCKS5 and system-proxy use require no elevation.
-- Add local named-pipe process-identity checks, heartbeat/parent-exit cleanup, helper-failure handling and separate build manifests for the two executables. See [Privilege separation and Windows Administrator Protection](#privilege-separation-and-windows-administrator-protection) for deployment and security boundaries.
+- Support direct Administrator logon and already-elevated desktops: an elevated GUI must match the current desktop Shell's user SID and Windows session ID, and the Shell must itself be elevated. Administrator Protection's isolated account and separate elevation above an ordinary desktop remain blocked.
+- Refine the pale-green/pink UI with an SGFG wordmark and version capsule, horizontal transport choices, a combined connection/traffic card, a fixed-position connection action bar, and three settings sections.
+- Fix the animated turtle's head being clipped at either end of its track.
+- Update both the GUI and driver helper to v12.1 (Windows file version `12.1.0.0`). This release is staged in `bin/v12.1/`; distribute the matching helper, `sockfilter/` and `licenses/` alongside the GUI.
+
+### What's new in v12.0
+
+- Replace GOST WebTransport and the official Hysteria client with a pinned OMHY core/extras snapshot and its required QUIC fork.
+- Provide exactly two modes, **omhy-direct** (UDP 10520–10522) and **omhy-turtleor** (UDP 11520–11522), with two nodes, **argon** and **barium**. Both modes use COPA and Blink and forward application TCP/UDP.
+- Use all Blink features from upstream: authenticated framing, padding, initial junk packets, replay/resource limits, fragmentation/reassembly and the 1200-byte inner QUIC packet contract. The supplied profiles use 1150-byte outer packets and fragmentation.
+- Preserve v11.4's ordinary-user GUI/elevated helper separation, process DNS, UDP endpoint pinning, local encrypted preferences and per-connection traffic counters.
 
 > ## Server Configuration and Licensing
 >
-> Server addresses, credentials and obfuscation settings are maintained in `internal/core/nodes.go`. Review this file before publishing your own repository or binaries. Documentation examples below use placeholders; they are not a proxy service.
+> All deployment-specific node addresses, credentials and per-mode Blink secrets are defined in **`internal/core/nodes.go`**. Sanitize that single file before publishing source. `config_demo/` is private reference material only: the application neither imports nor embeds it, and the entire directory can be deleted before publication without affecting the build. The values in this README are placeholders, not a provided proxy service. Hardcoded node secrets remain recoverable from the compiled GUI; the SS-password encryption feature does not protect them.
 >
-> This software is a **client only**. To use it, you must deploy and operate your own proxy servers and fill in your own node configuration in `internal/core/nodes.go` before building (see [Node Configuration](#node-configuration)). The authors do not provide, sell, or endorse any proxy service.
+> This software is a **client only**. Deploy and operate your own compatible OMHY servers and configure `internal/core/nodes.go` before building (see [Node Configuration](#node-configuration)). The authors do not provide, sell, or endorse any proxy service.
 
 ## Features
 
 | Feature | Description |
 |---|---|
-| WebTransport transport | GOST `relay+wt` (WebTransport/HTTP3) direct connection |
-| Hysteria2 transport | hy2 direct connection with salamander obfuscation and port hopping |
-| Turtleor transport | hy2 via warpplus (M-H3) with salamander obfuscation and port hopping |
+| omhy-direct | OMHY + COPA + Blink, direct server egress, entry UDP ports 10520–10522 |
+| omhy-turtleor | OMHY + COPA + Blink, Turtleor server-side egress, entry UDP ports 11520–11522 |
 | Node selection | Random selection per transport across configured nodes, with ICMP latency probing and automatic failover |
 | Local proxy | HTTP or SOCKS5 (mutually exclusive), listening on 127.0.0.1 or 0.0.0.0 (LAN access), default port 7788 with automatic increment if occupied |
 | System proxy | Automatically sets/restores the Windows system proxy on connect/disconnect; detects and repairs stale settings after abnormal exits |
 | Process proxy | Windows x64: proxy selected `.exe` names; other processes bypass. Case-insensitive exact filenames, including future instances. Mutually exclusive with the system proxy |
-| Driver lifecycle | Only connecting with process proxy enabled requests UAC for a headless helper. It manages the application-owned demand-start driver and filtering, then unloads/removes the driver on disconnect. The GUI and remote proxy core stay unelevated |
+| Driver lifecycle | Connecting with process proxy enabled launches a separate elevated headless helper, requesting UAC when needed. It manages the application-owned demand-start driver and filtering, then unloads/removes the driver on disconnect. The GUI and remote proxy core retain the desktop user's identity and normally run unelevated; already-elevated desktops are supported |
 | Process DNS | Captured UDP/TCP port 53 requests use `tcp://1.1.1.1:53` through the selected node; UDP requests are translated to TCP and replies restored to the original DNS peer |
 | Options window | Separate Wails window for proxy options, custom port, and the SS relay |
 | SS LAN relay | After connecting, exposes a `ss://aes-128-gcm` entrance forwarding to the local proxy, so other LAN devices can share the connection |
 | Password generator | Random relay passwords (8-16 alphanumeric characters) |
-| Traffic usage | Live upload/download totals for the current proxy connection, covering WebTransport, Hysteria2 and Turtleor, including process proxy and SS relay traffic |
+| Traffic usage | Live upload/download totals for the current OMHY connection, including process proxy and SS relay traffic, counted once |
 | Local preferences | Proxy switches, process list, requested local port, and SS relay port/password survive application restarts; node selection and traffic totals are never saved |
 
 ## Traffic usage and local preferences (v11.3.1)
@@ -41,7 +48,7 @@ A proxy client for Windows, written in Go. [GoST v3](https://github.com/go-gost/
 
 The main window displays separate **upload** (application → node) and **download** (node → application) totals, refreshed approximately once per second in B/KiB/MiB/GiB units. A successful new proxy connection starts fresh counters; disconnecting freezes the last totals for viewing. Restarting the application resets them to zero. A failed connection attempt does not erase the preceding session's display.
 
-Counting occurs at the remote proxy connection's application-data interface: GOST relay TCP streams for WebTransport, and Hysteria client TCP streams/UDP payloads for Hysteria2 and Turtleor. Process-proxy traffic, captured DNS forwarded through the node, explicit local proxy clients and SS relay clients share this boundary. The SS-to-local-proxy forwarding stage is not counted again, so relayed traffic contributes once. Bypassed traffic, node-selection probes, proxy authentication, QUIC encryption/framing and transport retransmissions are excluded. Application protocol headers (for example HTTP and DNS-over-TCP framing) are included. These are application-level transfer counters, not a network-adapter or ISP billing measurement, and an accepted write does not prove delivery to the final server.
+Counting occurs at the OMHY client's TCP stream and UDP payload interface in both modes. Process-proxy traffic, captured DNS forwarded through the node, explicit local proxy clients and SS relay clients share this boundary. The SS-to-local-proxy forwarding stage is not counted again, so relayed traffic contributes once. Bypassed traffic, node-selection probes, proxy authentication, QUIC/Blink framing, padding, junk packets and transport retransmissions are excluded. Application protocol headers (for example HTTP and DNS-over-TCP framing) are included. These are application-level transfer counters, not a network-adapter or ISP billing measurement, and an accepted write does not prove delivery to the final server.
 
 ### Saved settings
 
@@ -56,7 +63,7 @@ Settings are stored in **`%APPDATA%\SGFG\settings.json`** on Windows (Go's `os.U
 
 Transport/node selection, connection/relay activation, latency and upload/download totals remain runtime-only. Startup does not connect or select a node automatically.
 
-Proxy switches and committed local-port edits save automatically; use **Save settings** for process-list edits. SS port/password edits save on field commit, password generation, **Save relay settings**, or before enabling the relay. Pending or failed saves retain the draft and are shown in the options window; closing via its title bar checks for unsaved changes. Proxy options require disconnecting before editing, while relay settings can be changed with the main proxy connected as long as the relay is stopped.
+Proxy switches and committed local-port edits save automatically; use **Save (保存)** for process-list edits. SS port/password edits save on field commit, password generation, **Save (保存)** in the relay section, or before enabling the relay. Pending or failed saves retain the draft and are shown in the options window; closing via its title bar checks for unsaved changes. Proxy options require disconnecting before editing, while relay settings can be changed with the main proxy connected as long as the relay is stopped.
 
 The backend validates preferences and writes a same-directory temporary file before replacing the configuration. Failed writes leave the previous in-memory settings and file intact. Malformed, unsupported or unreadable settings produce a visible startup error and use defaults without silently replacing the original file; repair or move the file and restart before saving again. To reset preferences, exit the application and remove this file.
 
@@ -68,52 +75,56 @@ The settings schema is now **version 2**. On startup, valid version-1 plaintext 
 
 ## Tech Stack
 
-- **Backend**: Go 1.25+
-  - `github.com/go-gost/x` — GOST v3 core library
-  - `github.com/apernet/hysteria/core/v2` + `extras/v2` — Hysteria2 client + salamander obfuscation
+- **Backend**: Go 1.26+ (preferred toolchain 1.26.8)
+  - `github.com/zjl88858/oh-my-hysteria/core/v2` + `extras/v2` — OMHY client + full Blink wrapper
+  - OMHY's local `github.com/apernet/quic-go` fork — required transport hooks; not the stock module
+  - `github.com/go-gost/x` — local SS relay only, with no WebTransport dialer registered
   - `github.com/wailsapp/wails/v3` — desktop application framework
   - `golang.org/x/sys` — Windows registry access
 - **Frontend**: Vue 3 + TypeScript + Vite, Bun as package manager, `@wailsio/runtime`
 - **Optional process filtering**: NetFilter SDK SockFilter C API (Windows x64). This is a **commercial, separately licensed dependency**, not an open-source component of SGFG. Obtain appropriate runtime/driver distribution rights from the vendor.
 
-> Note: dependency versions in `go.mod` are **pinned deliberately** to stay protocol-compatible with a gost v3.1.0-era server stack (older relay/WebTransport behavior). Do not upgrade `go-gost/*`, `quic-go/*`, or `apernet/hysteria` unless your servers are upgraded accordingly.
+> OMHY is pinned at commit **`22b2f02784138663c13e1a0e9e0a06c5dc202dbf`** (v1.0.0-20261029) under `third_party/oh-my-hysteria/`. Root `replace` directives select the bundled core, extras and QUIC fork. Preserve that directory, including all nested third-party code and licenses. Do not replace just the transport with stock quic-go or update the snapshot independently of server compatibility tests.
 
 ## Node Configuration
 
-All node and server parameters live in `internal/core/nodes.go`. Before building, edit it to match your own servers:
+Edit the `Nodes` table and shared `nodeBlink` defaults in `internal/core/nodes.go`. No YAML file is read or embedded for node configuration. For example (replace placeholders):
 
 ```go
 var Nodes = []Node{
-	{Name: "node1", Host: "node1.example.com", Password: "your-password"},
-	{Name: "node2", Host: "node2.example.com", Password: "your-password"},
-	// add as many as you like; each transport picks one at random
+    {
+        Name: "argon",
+        Host: "argon.example.com",
+        Password: "REPLACE_NODE_AUTH",
+        DirectBlink: nodeBlink("REPLACE_DIRECT_BLINK_SECRET_32_BYTES_OR_MORE"),
+        TurtleorBlink: nodeBlink("REPLACE_TURTLEOR_BLINK_SECRET_32_BYTES_OR_MORE"),
+    },
+    {
+        Name: "barium",
+        Host: "barium.example.com",
+        Password: "REPLACE_OTHER_NODE_AUTH",
+        DirectBlink: nodeBlink("REPLACE_OTHER_DIRECT_BLINK_SECRET_32_BYTES_OR_MORE"),
+        TurtleorBlink: nodeBlink("REPLACE_OTHER_TURTLEOR_BLINK_SECRET_32_BYTES_OR_MORE"),
+    },
 }
-
-const (
-	GostServerPort = 1443                  // your gost relay+wt server port
-	ObfsHysteria2  = "your-hy2-obfs-pass"  // salamander obfs password for hysteria2
-	ObfsTurtleor   = "your-warp-obfs-pass" // salamander obfs password for turtleor
-)
 ```
 
-Other tunables in the same file:
+A node's modes share its host and auth but have independent Blink passwords. The shared `nodeBlink` function, also in `nodes.go`, sets 1150-byte outer packets, fragmentation on, padding up to 16 bytes, three initial junk packets and 3072 receive sessions. The remaining budgets use upstream defaults; edit them there or use an explicit per-node `BlinkConfig` if needed. General option mapping and validation live in `internal/core/blink.go`, which contains no deployment secrets.
 
-- `LocalProxyPort` (default 7788) and `LocalProxyPortMaxTry` — local listen port and auto-increment range
-- Port hopping ranges in `BuildSelection()`: hysteria2 uses a random port in 30000-50000, turtleor in 10000-20000 — align these with your server-side port hopping configuration
+Every upstream Blink option is supported through the Go fields `Password`, `MaxPacketSize`, `PaddingMax`, `JunkPackets`, `Fragmentation`, `MaxSessions`, `MaxReassemblyBytes` and `VerifyPacketsPerSecond`. Nil padding/junk pointers select defaults; pointers to zero disable them. Invalid Blink options and out-of-mode ports are rejected without logging credentials. The client uses COPA and lazy connection establishment; saved GUI options determine local protocol, address and port.
 
-Server-side requirements:
+**Blink does not support in-session port hopping.** Node selection chooses one port from the mode's inclusive three-port range; a later reconnect may select another single port. The same Blink socket never changes its remote endpoint. The UI's port is the initial selected entry port; reconnection logs report the actual connected endpoint. The mode names, ranges and local-port defaults are also in `nodes.go`. Rebuild after editing this file. The reference-only `config_demo/` directory is never needed to build, test or run SGFG.
 
-- **WebTransport**: a compatible `relay+wt` listener on `GostServerPort`, with user `dwg` and the per-node `Password` (client URL: `relay+wt://dwg:<password>@<host>:<port>?secure=true`). The configured custom server supports TCP only. The client therefore disables SOCKS5 UDP ASSOCIATE for this transport; process DNS uses TCP, and other non-local UDP traffic is dropped instead of leaking directly. QUIC transport packets to the node are still UDP; this restriction concerns proxied application traffic.
-- **Hysteria2 / Turtleor**: hysteria2 server with salamander obfuscation enabled, password = node `Password`, and port hopping covering the ranges above
+Turtleor is an OMHY server-side egress variant; the Windows client does not create a WARP tunnel. Its server must route outbound traffic through the intended Turtleor/WARP service. Simply changing the client mode does not configure that server egress.
 
 ## Build Requirements
 
 | Requirement | Version |
 |---|---|
 | OS | Windows 10/11 (sysproxy and ICMP ping are Windows-only implementations) |
-| Go | 1.25+ (per `go.mod`) |
+| Go | 1.26+; preferred toolchain 1.26.8 (per `go.mod`) |
 | Bun | 1.x, available in `PATH` |
-| Wails CLI | `v3.0.0-alpha2.117`, aligned with `go.mod` |
+| Wails CLI | `v3.0.0-alpha2.117`, compiled using Go 1.26+; an older CLI binary built with Go 1.25 cannot fully type-check the new core when generating bindings |
 | WebView2 Runtime | required at runtime (preinstalled on most Win10/11 systems) |
 | Administrator privileges | Launch the GUI normally, not as administrator. Only the separate process-filter helper requests UAC when connecting in process-proxy mode; UAC/security policies are not bypassed |
 | NetFilter SDK (optional) | Compatible x64 SockFilter C API DLL and a driver whose signature is accepted by the target Windows system |
@@ -128,6 +139,7 @@ cd frontend; bun install; cd ..
 # generates icons/syso, and compiles the exe
 wails3 build
 # output: bin/sgfg-ng.exe, bin/sgfg-driver-helper.exe (x64), and bin/sockfilter/ when SDK assets are available
+# also distribute bin/licenses/ (OMHY, QUIC and controller license notices)
 
 # development mode (frontend hot reload + Go recompile)
 wails3 dev
@@ -154,6 +166,7 @@ bin/
     nfapi.dll                    # sockfilter/bin/release_c_api/x64/nfapi.dll
     driver/x64/sockfilter.sys     # sockfilter/bin/driver/x64/sockfilter.sys
     license.rtf
+  licenses/                      # staged by build/windows/stage-core-licenses.ps1
 ```
 
 `build/windows/stage-sockfilter.ps1` copies assets only; it never installs a driver. Without SDK files, the ordinary proxy build remains available and process proxying reports the missing dependency when enabled. Do not commit or redistribute vendor binaries/source unless your license permits it. The bundled SDK used for internal evaluation has connection limits and test-signing restrictions; preparing a production UI does not turn an evaluation driver into a production-licensed driver.
@@ -164,7 +177,7 @@ The native Windows task builds the helper automatically using `build/windows/bui
 
 ### Using process proxy
 
-1. Launch the application normally as your interactive user. Do not use **Run as administrator**, an elevated terminal, or an administrator compatibility shortcut for the GUI.
+1. Launch the application normally from your desktop. On an ordinary desktop, do not separately use **Run as administrator**, an elevated terminal, or an administrator compatibility shortcut for the GUI. Direct Administrator logon (including an already-elevated desktop with UAC disabled) is supported when the GUI uses the same account and Windows session as that desktop.
 2. In Options, enter complete executable filenames (one per line, or comma-separated), save, and enable process proxy. Same-named processes are all selected; differently named child processes must be listed separately.
 3. Connect and approve UAC for **`sgfg-driver-helper.exe`**. The helper copies the driver to the protected Windows driver directory and starts **`sgfg_sockfilter`**, a demand-start kernel service owned by SGFG. It owns the SDK callbacks and local transparent TCP/UDP/DNS forwarding; the node-facing proxy core remains in the ordinary-user GUI. No manual installation script is needed. Cancelling UAC rolls back this connection attempt without changing Windows security settings.
 4. Restart target applications or create new connections. Existing sockets are not guaranteed to be reclassified.
@@ -172,7 +185,9 @@ The native Windows task builds the helper automatically using `build/windows/bui
 
 ### Privilege separation and Windows Administrator Protection
 
-The ordinary-user process exclusively owns Wails/WebView2, `%APPDATA%` preferences and password decryption, HKCU system-proxy changes, the remote GOST/Hysteria client and traffic totals. It refuses an explicitly elevated launch **before** accessing settings, the system proxy or WebView2. This avoids creating a browser profile or writing proxy settings under the temporary `ADMIN_*` account used by Windows Administrator Protection. An ordinary HTTP/SOCKS5 or system-proxy connection does not launch a helper or show UAC. Merely saving/enabling the process-proxy option does not elevate either; connecting does.
+The GUI, normally unelevated, exclusively owns Wails/WebView2, `%APPDATA%` preferences and password decryption, HKCU system-proxy changes, the remote OMHY client and traffic totals. Before accessing settings, the system proxy or WebView2, startup checks the process token. An unelevated GUI is allowed directly. An elevated GUI is allowed only if its user SID and Windows session ID match the current desktop Shell's token and that Shell is itself elevated. This supports direct Administrator logon and already-elevated desktops without writing another user's profile or HKCU. Under Administrator Protection the isolated elevated account has a different SID and is rejected; separate same-account elevation above an unelevated desktop is also rejected.
+
+The desktop is located with `GetShellWindow`, not by enumerating `explorer.exe` or using the active console session, so a remote desktop uses its own Shell. No account-name prefixes, localized Administrator names, OS-version assumptions or security-policy changes are involved. If an elevated launch cannot read a stable desktop identity (for example, the Shell is restarting or absent), startup reports that verification failure and asks the user to retry after the desktop is ready. These checks keep the GUI attached to the intended user profile; they do not identify an arbitrary account as an Administrator Protection account solely from its name. An ordinary HTTP/SOCKS5 or system-proxy connection does not launch a helper or show UAC. Merely saving/enabling the process-proxy option does not elevate either; connecting does.
 
 Each process-proxy connection launches one helper through `ShellExecuteExW` with the `runas` verb, not a command interpreter. The helper has no GUI/WebView2, no node credentials, no SS credentials, no user-settings access and no HKCU proxy logic. It talks only to the parent's loopback SOCKS5 listener. Both the GUI PID and helper PID bypass filtering to prevent recursion even if their filenames appear in the process list.
 
@@ -199,7 +214,7 @@ DNS scope is limited to captured queries from selected processes. Windows DNS Cl
 - Matching uses complete case-insensitive executable basenames, not paths, PIDs or wildcards. Unselected processes and the proxy application's own PID bypass filtering. This does not stop applications or LAN clients from explicitly connecting to an exposed local proxy or SS relay.
 - Loopback, link-local, multicast and broadcast traffic normally bypass filtering. Captured DNS port 53 is an exception, including queries originally sent to a router or loopback resolver; private unicast destinations otherwise remain proxied.
 - Captured UDP DNS is converted to TCP through the selected node, with the original DNS peer and query ID restored in replies. Oversized replies are truncated with the DNS TC flag for TCP retry; query errors return SERVFAIL, with no local DNS fallback. Do not add the shared Windows host `svchost.exe` merely to capture system DNS.
-- WebTransport forwards application TCP only: captured DNS is converted to TCP and other non-local UDP is dropped, not sent directly. Hysteria2/Turtleor support ordinary UDP forwarding. Failed forwarding handshakes or full queues do not trigger a direct fallback while traffic is captured, but this is **not a kill switch**.
+- Both OMHY modes forward application TCP and UDP. Captured DNS still uses TCP regardless of mode. Failed forwarding handshakes or full queues do not trigger a direct fallback while traffic is captured, but this is **not a kill switch**.
 - IPv6 TCP and unconnected UDP forwarding are supported. If Windows has no usable IPv6 route, an application's connected UDP socket may fail before sending; this implementation does not rewrite UDP `connect` to supply a missing route.
 
 ### Driver troubleshooting
@@ -215,173 +230,41 @@ Ordinary automated tests do not install or load the driver. The v11.3 lifecycle 
 
 ## Server Deployment
 
-The following is a reference deployment using **GoST** and **Hysteria2** on Linux (Debian/Ubuntu shown). A custom compatible WebTransport server can replace GoST; these examples do not describe the internal node implementation. You need a domain name per node pointing at the server and a valid TLS certificate.
+Use the compatible [OMHY server](https://github.com/zjl88858/oh-my-hysteria), not the retired GOST WebTransport or stock Salamander-only Hysteria setup. A node needs a trusted TLS certificate for its configured hostname. The Windows client verifies TLS normally; it does not enable `insecure`.
 
-### 0. TLS certificate
-
-Both GoST (`secure=true` on the client) and Hysteria2 require a trusted certificate:
-
-```bash
-sudo apt install certbot
-sudo certbot certonly --standalone -d node1.example.com
-# cert: /etc/letsencrypt/live/node1.example.com/fullchain.pem
-# key:  /etc/letsencrypt/live/node1.example.com/privkey.pem
-```
-
-### 1. GoST (WebTransport transport)
-
-Download **gost v3.1.0** (this exact era is required — the client's pinned libraries are protocol-compatible with it, not with newer releases):
-
-```bash
-curl -L -o gost.tar.gz https://github.com/go-gost/gost/releases/download/v3.1.0/gost_3.1.0_linux_amd64.tar.gz
-tar xzf gost.tar.gz && sudo mv gost /usr/local/bin/gost && sudo chmod +x /usr/local/bin/gost
-```
-
-Run a `relay+wt` listener on UDP port 1443. The client connects as user `dwg` with the per-node password from `nodes.go`:
-
-```bash
-gost -L "relay+wt://dwg:NODE_PASSWORD@:1443?cert=/etc/letsencrypt/live/node1.example.com/fullchain.pem&key=/etc/letsencrypt/live/node1.example.com/privkey.pem"
-```
-
-systemd unit `/etc/systemd/system/gost.service`:
-
-```ini
-[Unit]
-Description=gost relay+wt
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/gost -L "relay+wt://dwg:NODE_PASSWORD@:1443?cert=/etc/letsencrypt/live/node1.example.com/fullchain.pem&key=/etc/letsencrypt/live/node1.example.com/privkey.pem"
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable --now gost
-```
-
-### 2. Hysteria2 (Hysteria2 transport)
-
-Install via the official script (creates the `hysteria-server` systemd service):
-
-```bash
-bash <(curl -fsSL https://get.hy2.sh/)
-```
-
-Edit `/etc/hysteria/config.yaml` — salamander obfs password must equal `ObfsHysteria2` in `nodes.go`, auth password must equal the node's `Password`:
+Example direct server profile for one entry port:
 
 ```yaml
-listen: :443
-
+listen: :10520
 tls:
-  cert: /etc/letsencrypt/live/node1.example.com/fullchain.pem
-  key: /etc/letsencrypt/live/node1.example.com/privkey.pem
-
+  cert: /etc/letsencrypt/live/argon.example.com/fullchain.pem
+  key: /etc/letsencrypt/live/argon.example.com/privkey.pem
 auth:
   type: password
-  password: NODE_PASSWORD
-
+  password: REPLACE_NODE_AUTH
 obfs:
-  type: salamander
-  salamander:
-    password: HY2_OBFS_PASSWORD
-
-masquerade:
-  type: proxy
-  proxy:
-    url: https://www.bing.com
-    rewriteHost: true
+  type: blink
+  blink:
+    password: REPLACE_WITH_THE_DIRECT_PROFILE_SECRET
+    maxPacketSize: 1150
+    fragmentation: true
+    paddingMax: 16
+    junkPackets: 0
+    maxSessions: 3072
+congestion:
+  type: copa
+ignoreClientBandwidth: true
 ```
 
-```bash
-sudo systemctl enable --now hysteria-server
-```
+Serve all three direct ports (10520–10522) and all three Turtleor ports (11520–11522), either with compatible listeners or server-side forwarding to the appropriate mode's OMHY instance. Do not redirect both mode ranges to the same instance if their Blink secrets or egress policies differ. Configure the second instance's Blink password from the Turtleor profile and its server-side outbound policy for Turtleor/WARP egress. Both ends must agree on Blink password and fragmentation. Server `junkPackets` must be zero or omitted; the client examples use three.
 
-**Port hopping** — the client dials a random UDP port in 30000-50000; redirect that range to the real listen port:
-
-```bash
-sudo iptables -t nat -A PREROUTING -i eth0 -p udp --dport 30000:50000 -j DNAT --to-destination :443
-sudo apt install iptables-persistent   # to survive reboots
-```
-
-### 3. Turtleor (Hysteria2 through Cloudflare WARP)
-
-The Turtleor transport is a second Hysteria2 instance whose outbound traffic exits through Cloudflare WARP instead of the server IP directly.
-
-**Install and start warp-cli:**
-
-```bash
-curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-sudo apt update && sudo apt install cloudflare-warp
-
-warp-cli registration new
-warp-cli mode proxy          # expose a local SOCKS5 endpoint instead of tunneling the whole host
-warp-cli proxy port 40000
-warp-cli connect
-warp-cli account             # verify: Account type: Free
-```
-
-**Second Hysteria2 instance** — create `/etc/hysteria/warp.yaml` (note `ObfsTurtleor` is different from `ObfsHysteria2`), routing all traffic through the WARP SOCKS5 endpoint via `outbounds` + `acl`:
-
-```yaml
-listen: :8443
-
-tls:
-  cert: /etc/letsencrypt/live/node1.example.com/fullchain.pem
-  key: /etc/letsencrypt/live/node1.example.com/privkey.pem
-
-auth:
-  type: password
-  password: NODE_PASSWORD
-
-obfs:
-  type: salamander
-  salamander:
-    password: TURTLEOR_OBFS_PASSWORD
-
-outbounds:
-  - name: warp
-    type: socks5
-    socks5:
-      addr: 127.0.0.1:40000
-
-acl:
-  inline:
-    - warp(all)
-
-masquerade:
-  type: proxy
-  proxy:
-    url: https://www.bing.com
-    rewriteHost: true
-```
-
-```bash
-sudo systemctl enable --now hysteria-server@warp   # instance name = config file name
-sudo iptables -t nat -A PREROUTING -i eth0 -p udp --dport 10000:20000 -j DNAT --to-destination :8443
-```
-
-### 4. Firewall
-
-Open (also in your cloud provider's security group):
-
-| Port | Protocol | Used by |
-|---|---|---|
-| 1443 | UDP | GoST relay+wt (QUIC) |
-| 443 | UDP | Hysteria2 direct |
-| 30000-50000 | UDP | Hysteria2 port hopping |
-| 8443 | UDP | Turtleor instance |
-| 10000-20000 | UDP | Turtleor port hopping |
-| 80/443 | TCP | certbot / masquerade (temporary) |
+Open these **UDP** ranges in the server firewall and provider security group. Certificate issuance may separately require TCP 80/443. COPA configures the sender on each side independently: this client requests COPA for uploads; configure the server for COPA as well if downloads should use it. See the pinned upstream `README.md`, `docs/copa.md` and `docs/blink.md` for parameter limits and experimental-status warnings. This application does not deploy or reconfigure servers.
 
 ## Client Build & Deployment
 
-1. Edit `internal/core/nodes.go` with your own servers (see [Node Configuration](#node-configuration)); passwords and obfs secrets must match the server configs above.
+1. Edit `internal/core/nodes.go` with your own servers (see [Node Configuration](#node-configuration)); auth and per-mode Blink secrets must match the server configuration. Before publishing source, sanitize only that file and remove any private `config_demo/` reference directory. No sanitization is performed automatically.
 2. Run `wails3 build`.
-3. For ordinary proxy use, distribute `bin/sgfg-ng.exe`. For process proxying, also distribute `bin/sgfg-driver-helper.exe` and the licensed `sockfilter/` runtime directory beside it. Custom installers and cross-build pipelines must preserve this directory layout; packaging a driver is not the same as installing it.
+3. Distribute `bin/sgfg-ng.exe` and `bin/licenses/`. For process proxying, also distribute `bin/sgfg-driver-helper.exe` and the licensed `sockfilter/` runtime directory beside it. Custom installers and cross-build pipelines must preserve this directory layout; packaging a driver is not the same as installing it.
 4. On first run, pick a transport, connect, and optionally open the options window (gear icon) for SOCKS5 mode, LAN access, custom port, or the SS relay.
 
 ## Project Structure
@@ -393,14 +276,18 @@ sgfg-ng/
 ├── build/                      # wails3 build assets (icon, syso, product info)
 ├── internal/
 │   ├── core/
-│   │   ├── nodes.go            # node table, transports, port hopping, password generator
-│   │   ├── gost.go             # GOST library wrapper: CLI-style URLs -> service instances
-│   │   ├── hysteria.go         # Hysteria2 client wrapper (lazy reconnect + salamander)
+│   │   ├── nodes.go            # sole deployment node/secret table, Blink defaults and port ranges
+│   │   ├── blink.go            # full Blink option mapping/validation, no deployment secrets
+│   │   ├── gost.go             # local SS LAN entrance only
+│   │   ├── omhy.go             # OMHY + COPA + Blink, lazy reconnect and tracked shutdown
 │   │   └── localproxy.go       # local SOCKS5 (incl. UDP ASSOCIATE) / HTTP CONNECT server
 │   ├── proxy/manager.go        # core state machine: select/connect/disconnect/relay/sysproxy
 │   ├── sockfilter/             # process rules, DNS-over-TCP, native API and managed driver lifecycle
+│   ├── filterhelper/           # authenticated local IPC and elevated helper lifecycle
 │   ├── sysproxy/               # Windows system proxy (registry + wininet refresh)
 │   └── ping/                   # ICMP ping via iphlpapi IcmpSendEcho (no admin needed)
+├── third_party/oh-my-hysteria/ # pinned upstream core/extras/QUIC source and notices
+├── cmd/sgfg-driver-helper/     # headless elevated entry point
 └── frontend/
     ├── bindings/               # generated by wails3 (do not edit)
     └── src/
@@ -413,21 +300,23 @@ sgfg-ng/
 
 - Windows only (system proxy and ping are Windows-specific).
 - Process proxying currently supports Windows x64 only. Driver loading depends on Windows signature/security policy; the SDK evaluation driver is not a production distribution license.
-- WebTransport application forwarding is TCP-only. Hysteria2/Turtleor retain UDP support. Captured DNS 53 queries use TCP regardless of the selected transport.
+- COPA and Blink are experimental upstream features, not a guarantee of DPI resistance or availability. Blink has no in-session port hopping; reconnects can choose another entry port. Both modes support TCP/UDP; captured DNS 53 always uses TCP.
 - Conflicting third-party proxy rules may cause repeated proxying; exclude SGFG and the selected applications from those rules where appropriate.
 - Driver installation/unload regression tests use fake lifecycle backends by default. Real driver/network tests are opt-in, require elevation and must not run concurrently with the application using the driver.
-- The Hysteria2/Turtleor local SOCKS5 UDP relay pins the client's IP and **nonzero UDP source port from the TCP ASSOCIATE request**, before receiving any datagrams. The IP must match the TCP peer (an unspecified IP uses that peer); all other source endpoints, invalid reserved bytes and fragments are dropped. To prevent local first-packet hijacking, zero-port and domain-name source requests are rejected with SOCKS5 REP=2 rather than learned from incoming UDP. The built-in process-proxy helper already declares its real UDP endpoint and is unaffected; external UDP clients must do the same. The relay socket binds to the TCP connection's local address and works for LAN clients when LAN access is enabled. This endpoint binding does not turn the unauthenticated local proxy into a per-user authentication boundary.
+- The OMHY local SOCKS5 UDP relay pins the client's IP and **nonzero UDP source port from the TCP ASSOCIATE request**, before receiving any datagrams. The IP must match the TCP peer (an unspecified IP uses that peer); all other source endpoints, invalid reserved bytes and fragments are dropped. To prevent local first-packet hijacking, zero-port and domain-name source requests are rejected with SOCKS5 REP=2 rather than learned from incoming UDP. The built-in process-proxy helper already declares its real UDP endpoint and is unaffected; external UDP clients must do the same. The relay socket binds to the TCP connection's local address and works for LAN clients when LAN access is enabled. This endpoint binding does not turn the unauthenticated local proxy into a per-user authentication boundary.
 - Local connections are capped at 512 concurrent sessions; HTTP CONNECT headers are capped at 64 KB.
-- Node information is hardcoded by design; changing nodes requires editing `internal/core/nodes.go` and rebuilding.
+- Node settings are hardcoded in `internal/core/nodes.go`; changing them requires editing that one file and rebuilding. `config_demo/` is not a build or runtime dependency. ICMP probing is not proof that UDP authentication or a particular remote destination is reachable. A locally ready lazy proxy is not yet proof of an upstream session.
 
 ## Acknowledgments
 
 This project was built in collaboration with AI pair-programming and review models:
 
 - **Kimi K3** — co-developer: full Go rewrite, backend architecture, UI implementation, debugging, and documentation
-- **GPT 6 Astra** — co-developer: SockFilter process-proxy integration, DNS-over-TCP forwarding, driver lifecycle management, settings-save fixes, regression tests, and v11.3 release documentation
+- **GPT 6 Astra** — co-developer: SockFilter process-proxy integration, DNS-over-TCP forwarding, driver lifecycle management, settings persistence and password encryption, traffic accounting, OMHY/COPA/Blink migration, SOCKS5 UDP endpoint-pinning fix, pale-green/pink UI redesign and animation fixes, desktop-identity startup checks for direct Administrator logon, regression testing, and v11.3–v12.1 release documentation and packaging
 - **GPT 6.1 Sol** — co-developer: v11.4 privilege separation, elevated driver helper, authenticated local IPC, lifecycle regression tests, Windows Administrator Protection compatibility work, and release documentation
+- **Gemini 4 Carbon** — co-developer: desktop-identity startup checks for direct Administrator logon research, github project management
 - **GPT 5.6 Luna** — code review
+- **GPT Daybreak Blue** — code review, security review
 - **Grok 4.5** — code review
 - **Grok 4.6** — code review
 - **Muse Spark 1.3** — code review
@@ -439,4 +328,4 @@ This project was built in collaboration with AI pair-programming and review mode
 
 This project's own code is released under the **MIT-0 (MIT No Attribution)** license — see [LICENSE](LICENSE). You may use it freely, with no attribution required.
 
-**Important:** the bundled dependencies [GoST](https://github.com/go-gost/gost) and [Hysteria2](https://github.com/apernet/hysteria) are licensed under the **MIT license**, which *does* require retaining their copyright and license notices. When redistributing this software (source or binary), you must include the [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) file shipped in this repository.
+**Important:** SGFG's own license does not relicense its dependencies. OMHY original additions use MIT-0; inherited Hysteria2/QUIC and GOST code retain MIT; the COPA adaptation retains TQUIC's Apache-2.0 obligations, and other upstream adaptations retain their original notices. Retain [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md), the snapshot's original license files, and the staged `licenses/` directory when distributing binaries. NetFilter SDK remains separately licensed commercial software.

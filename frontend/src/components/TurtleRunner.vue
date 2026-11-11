@@ -10,6 +10,8 @@ const shellId = `${id}-shell`
 const skinId = `${id}-skin`
 const ground = 57
 const cycleDuration = 12.8
+// Include the extended head, its stroke and the turning pose, not just the shell.
+const edgeInset = 60
 const stance = 0.62
 const stride = 12 / stance
 
@@ -35,7 +37,7 @@ function poseAt(clock: number, still = false) {
   const lap = Math.floor(clock / cycleDuration)
   const t = clock % cycleDuration
   const direction = lap % 2 === 0 ? 1 : -1
-  const room = Math.max(0, width.value - 96)
+  const room = Math.max(0, width.value - edgeInset * 2)
   const rollDistance = Math.min(120, room * 0.64)
   const walkDistance = room - rollDistance
   const walk = clamp(t / 5.4)
@@ -76,7 +78,7 @@ function poseAt(clock: number, still = false) {
   const facing = direction * Math.cos(turn * Math.PI)
   const blinkTime = clock % 3.7
   const blink = still ? 1 : 1 - 0.92 * Math.sin(clamp((blinkTime - 3.48) / 0.18) * Math.PI)
-  const x = still ? width.value / 2 : direction === 1 ? 48 + distance : width.value - 48 - distance
+  const x = still ? width.value / 2 : direction === 1 ? edgeInset + distance : width.value - edgeInset - distance
   if (still) { tuck = 0; angle = 0; wiggle = 0 }
   const resting = still ? 1 : ease((t - 5.4) / 0.3)
   const legs = [
@@ -134,7 +136,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', syncMotion)
   observer = new ResizeObserver(([entry]) => {
     if (!entry || disposed) return
-    width.value = Math.max(96, entry.contentRect.width * 64 / 40)
+    width.value = Math.max(edgeInset * 2, entry.contentRect.width * 64 / 40)
     pose.value = poseAt(elapsed, motion?.matches)
   })
   if (track.value) observer.observe(track.value)

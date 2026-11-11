@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	hyclient "github.com/apernet/hysteria/core/v2/client"
+	hyclient "github.com/zjl88858/oh-my-hysteria/core/v2/client"
 )
 
 type udpTestPacket struct {

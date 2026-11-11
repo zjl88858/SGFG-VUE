@@ -2,6 +2,7 @@
 const props = defineProps<{
   modelValue: boolean
   label: string
+  description?: string
   disabled?: boolean
 }>()
 
@@ -19,25 +20,32 @@ function toggle() {
 </script>
 
 <template>
-  <div class="toggle-row" :class="{ disabled }" @click="toggle">
-    <span class="toggle-label">{{ label }}</span>
-    <span class="toggle-track" :class="{ on: modelValue }">
+  <button type="button" class="toggle-row" role="switch" :aria-checked="modelValue" :aria-label="label" :class="{ disabled }" :disabled="disabled" @click="toggle">
+    <span class="toggle-copy"><span class="toggle-label">{{ label }}</span><span v-if="description" class="toggle-description">{{ description }}</span></span>
+    <span class="toggle-track" :class="{ on: modelValue }" aria-hidden="true">
       <span class="toggle-knob"></span>
     </span>
-  </div>
+  </button>
 </template>
 
 <style scoped>
 .toggle-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 9px 4px;
+  padding: 12px 4px;
   cursor: pointer;
   border-radius: 10px;
   transition: background 0.2s ease, opacity 0.4s ease;
 }
+
+.toggle-copy { display: flex; flex-direction: column; gap: 4px; }
+.toggle-description { font-size: 10px; color: var(--muted); line-height: 1.5; }
 
 .toggle-row .toggle-track,
 .toggle-row .toggle-label {
@@ -54,15 +62,15 @@ function toggle() {
 }
 
 .toggle-label {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 400;
   color: var(--ink);
 }
 
 .toggle-track {
   flex: none;
-  width: 46px;
-  height: 26px;
+  width: 40px;
+  height: 23px;
   border-radius: 999px;
   background: #d7e4dc;
   position: relative;
@@ -71,16 +79,16 @@ function toggle() {
 }
 
 .toggle-track.on {
-  background: linear-gradient(135deg, var(--green-400), var(--green-500));
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06), 0 0 10px rgba(52, 211, 153, 0.5);
+  background: #78bf97;
+  box-shadow: none;
 }
 
 .toggle-knob {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
@@ -88,7 +96,7 @@ function toggle() {
 }
 
 .toggle-track.on .toggle-knob {
-  transform: translateX(20px);
+  transform: translateX(17px);
 }
 
 .toggle-row:active:not(.disabled) .toggle-knob {
@@ -96,6 +104,6 @@ function toggle() {
 }
 
 .toggle-row:active:not(.disabled) .toggle-track.on .toggle-knob {
-  transform: translateX(20px) scale(0.85);
+  transform: translateX(17px) scale(0.85);
 }
 </style>

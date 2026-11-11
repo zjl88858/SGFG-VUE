@@ -7,6 +7,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as core$0 from "./internal/core/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as proxy$0 from "./internal/proxy/models.js";
 
 export function CloseOptions(): $CancellablePromise<void> {
@@ -41,14 +44,28 @@ export function PingSelected(): $CancellablePromise<proxy$0.PingResult> {
     });
 }
 
+export function RelayOptions(): $CancellablePromise<proxy$0.RelayOptions> {
+    return $Call.ByID(488530360).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
 export function SelectTransport(transport: string): $CancellablePromise<proxy$0.SelectResult> {
     return $Call.ByID(3057728830, transport).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
 export function SetOptions(opts: proxy$0.ConnectOptions): $CancellablePromise<string> {
     return $Call.ByID(986222467, opts);
+}
+
+export function SetRelayOptions(opts: proxy$0.RelayOptions): $CancellablePromise<string> {
+    return $Call.ByID(1834832490, opts);
+}
+
+export function SettingsError(): $CancellablePromise<string> {
+    return $Call.ByID(1853963338);
 }
 
 export function StartRelay(port: number, password: string): $CancellablePromise<string> {
@@ -57,12 +74,18 @@ export function StartRelay(port: number, password: string): $CancellablePromise<
 
 export function Status(): $CancellablePromise<proxy$0.StatusInfo> {
     return $Call.ByID(4123605683).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
 export function StopRelay(): $CancellablePromise<string> {
     return $Call.ByID(1643130038);
+}
+
+export function Traffic(): $CancellablePromise<core$0.TrafficSnapshot> {
+    return $Call.ByID(1022809282).then(($result: any) => {
+        return $$createType5($result);
+    });
 }
 
 export function Version(): $CancellablePromise<string> {
@@ -72,5 +95,7 @@ export function Version(): $CancellablePromise<string> {
 // Private type creation functions
 const $$createType0 = proxy$0.ConnectOptions.createFrom;
 const $$createType1 = proxy$0.PingResult.createFrom;
-const $$createType2 = proxy$0.SelectResult.createFrom;
-const $$createType3 = proxy$0.StatusInfo.createFrom;
+const $$createType2 = proxy$0.RelayOptions.createFrom;
+const $$createType3 = proxy$0.SelectResult.createFrom;
+const $$createType4 = proxy$0.StatusInfo.createFrom;
+const $$createType5 = core$0.TrafficSnapshot.createFrom;

@@ -159,7 +159,7 @@ func Start(port int, names []string, log func(string, string), options ...Option
 	}
 	log("info", "进程代理已开启: "+strings.Join(names, ", "))
 	if s.tcpOnly {
-		log("info", "WebTransport 使用 TCP 转发，DNS 查询自动转换为 TCP")
+		log("info", "当前上游仅支持 TCP，DNS 查询自动转换为 TCP")
 	}
 	if s.debug {
 		s.wg.Add(1)
